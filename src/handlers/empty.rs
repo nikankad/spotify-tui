@@ -15,14 +15,14 @@ pub fn handler(key: Key, app: &mut App) {
       ActiveBlock::Library => {
         app.set_current_route_state(None, Some(ActiveBlock::MyPlaylists));
       }
-      ActiveBlock::ArtistBlock
+      ActiveBlock::Media
+      | ActiveBlock::ArtistBlock
       | ActiveBlock::AlbumList
       | ActiveBlock::AlbumTracks
       | ActiveBlock::Artists
       | ActiveBlock::Podcasts
       | ActiveBlock::EpisodeTable
       | ActiveBlock::Home
-      | ActiveBlock::MadeForYou
       | ActiveBlock::MyPlaylists
       | ActiveBlock::RecentlyPlayed
       | ActiveBlock::TrackTable => {
@@ -40,14 +40,14 @@ pub fn handler(key: Key, app: &mut App) {
       _ => {}
     },
     k if common_key_events::left_event(k) => match app.get_current_route().hovered_block {
-      ActiveBlock::ArtistBlock
+      ActiveBlock::Media
+      | ActiveBlock::ArtistBlock
       | ActiveBlock::AlbumList
       | ActiveBlock::AlbumTracks
       | ActiveBlock::Artists
       | ActiveBlock::Podcasts
       | ActiveBlock::EpisodeTable
       | ActiveBlock::Home
-      | ActiveBlock::MadeForYou
       | ActiveBlock::RecentlyPlayed
       | ActiveBlock::TrackTable => {
         app.set_current_route_state(None, Some(ActiveBlock::Library));

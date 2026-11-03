@@ -5,8 +5,6 @@ use std::{sync::mpsc, thread, time::Duration};
 #[derive(Debug, Clone, Copy)]
 /// Configuration for event handling.
 pub struct EventConfig {
-  /// The key that is used to exit the application.
-  pub exit_key: Key,
   /// The tick rate at which the application will sent an tick event.
   pub tick_rate: Duration,
 }
@@ -14,7 +12,6 @@ pub struct EventConfig {
 impl Default for EventConfig {
   fn default() -> EventConfig {
     EventConfig {
-      exit_key: Key::Ctrl('c'),
       tick_rate: Duration::from_millis(250),
     }
   }
@@ -28,12 +25,9 @@ pub enum Event<I> {
   Tick,
 }
 
-/// A small event handler that wrap crossterm input and tick event. Each event
-/// type is handled in its own thread and returned to a common `Receiver`
+/// A bounded input/tick queue fed by one Crossterm polling thread.
 pub struct Events {
   rx: mpsc::Receiver<Event<Key>>,
-  // Need to be kept around to prevent disposing the sender side.
-  _tx: mpsc::Sender<Event<Key>>,
 }
 
 impl Events {
@@ -41,31 +35,42 @@ impl Events {
   pub fn new(tick_rate: u64) -> Events {
     Events::with_config(EventConfig {
       tick_rate: Duration::from_millis(tick_rate),
-      ..Default::default()
     })
   }
 
   /// Constructs an new instance of `Events` from given config.
   pub fn with_config(config: EventConfig) -> Events {
-    let (tx, rx) = mpsc::channel();
+    let (event_tx, rx) = mpsc::sync_channel(64);
 
-    let event_tx = tx.clone();
     thread::spawn(move || {
-      loop {
-        // poll for tick rate duration, if no event, sent tick event.
-        if event::poll(config.tick_rate).unwrap() {
-          if let event::Event::Key(key) = event::read().unwrap() {
-            let key = Key::from(key);
+      while let Ok(ready) = event::poll(config.tick_rate) {
+        let input = if ready {
+          match event::read() {
+            Ok(input) => Some(input),
+            Err(_) => break,
+          }
+        } else {
+          None
+        };
+        if let Some(event::Event::Key(key)) = input {
+          if key.kind == event::KeyEventKind::Release {
+            continue;
+          }
+          let key = Key::from(key);
 
-            event_tx.send(Event::Input(key)).unwrap();
+          if event_tx.send(Event::Input(key)).is_err() {
+            break;
           }
         }
 
-        event_tx.send(Event::Tick).unwrap();
+        match event_tx.try_send(Event::Tick) {
+          Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
+          Err(mpsc::TrySendError::Disconnected(_)) => break,
+        }
       }
     });
 
-    Events { rx, _tx: tx }
+    Events { rx }
   }
 
   /// Attempts to read an event.

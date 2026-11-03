@@ -67,20 +67,19 @@ pub fn on_high_press_handler() -> usize {
 }
 
 pub fn on_middle_press_handler<T>(selection_data: &[T]) -> usize {
-  let mut index = selection_data.len() / 2;
-  if selection_data.len() % 2 == 0 {
-    index -= 1;
-  }
-  index
+  selection_data.len().saturating_sub(1) / 2
 }
 
 pub fn on_low_press_handler<T>(selection_data: &[T]) -> usize {
-  selection_data.len() - 1
+  selection_data.len().saturating_sub(1)
 }
 
 pub fn handle_right_event(app: &mut App) {
   match app.get_current_route().hovered_block {
     ActiveBlock::MyPlaylists | ActiveBlock::Library => match app.get_current_route().id {
+      RouteId::Media(_) => {
+        app.set_current_route_state(Some(ActiveBlock::Media), Some(ActiveBlock::Media))
+      }
       RouteId::AlbumTracks => {
         app.set_current_route_state(
           Some(ActiveBlock::AlbumTracks),
@@ -93,9 +92,7 @@ pub fn handle_right_event(app: &mut App) {
       RouteId::Podcasts => {
         app.set_current_route_state(Some(ActiveBlock::Podcasts), Some(ActiveBlock::Podcasts));
       }
-      RouteId::Recommendations => {
-        app.set_current_route_state(Some(ActiveBlock::TrackTable), Some(ActiveBlock::TrackTable));
-      }
+
       RouteId::AlbumList => {
         app.set_current_route_state(Some(ActiveBlock::AlbumList), Some(ActiveBlock::AlbumList));
       }
@@ -105,9 +102,7 @@ pub fn handle_right_event(app: &mut App) {
           Some(ActiveBlock::EpisodeTable),
         );
       }
-      RouteId::MadeForYou => {
-        app.set_current_route_state(Some(ActiveBlock::MadeForYou), Some(ActiveBlock::MadeForYou));
-      }
+
       RouteId::Artists => {
         app.set_current_route_state(Some(ActiveBlock::Artists), Some(ActiveBlock::Artists));
       }
@@ -132,7 +127,6 @@ pub fn handle_right_event(app: &mut App) {
       }
       RouteId::SelectedDevice => {}
       RouteId::Error => {}
-      RouteId::Analysis => {}
       RouteId::BasicView => {}
       RouteId::Dialog => {}
     },
@@ -148,6 +142,12 @@ pub fn handle_left_event(app: &mut App) {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn empty_lists_have_a_safe_selection() {
+    assert_eq!(on_middle_press_handler::<()>(&[]), 0);
+    assert_eq!(on_low_press_handler::<()>(&[]), 0);
+  }
 
   #[test]
   fn test_on_down_press_handler() {

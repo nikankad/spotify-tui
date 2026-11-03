@@ -51,19 +51,15 @@ pub fn handler(key: Key, app: &mut App) {
       app.input_idx = 0;
       app.input_cursor_position = 0;
     }
-    Key::Left | Key::Ctrl('b') => {
-      if !app.input.is_empty() && app.input_idx > 0 {
-        let last_c = app.input[app.input_idx - 1];
-        app.input_idx -= 1;
-        app.input_cursor_position -= compute_character_width(last_c);
-      }
+    Key::Left | Key::Ctrl('b') if !app.input.is_empty() && app.input_idx > 0 => {
+      let last_c = app.input[app.input_idx - 1];
+      app.input_idx -= 1;
+      app.input_cursor_position -= compute_character_width(last_c);
     }
-    Key::Right | Key::Ctrl('f') => {
-      if app.input_idx < app.input.len() {
-        let next_c = app.input[app.input_idx];
-        app.input_idx += 1;
-        app.input_cursor_position += compute_character_width(next_c);
-      }
+    Key::Right | Key::Ctrl('f') if app.input_idx < app.input.len() => {
+      let next_c = app.input[app.input_idx];
+      app.input_idx += 1;
+      app.input_cursor_position += compute_character_width(next_c);
     }
     Key::Esc => {
       app.set_current_route_state(Some(ActiveBlock::Empty), Some(ActiveBlock::Library));
@@ -74,21 +70,20 @@ pub fn handler(key: Key, app: &mut App) {
       process_input(app, input_str);
     }
     Key::Char(c) => {
+      if c.is_control() || app.input.len() >= 4096 {
+        return;
+      }
       app.input.insert(app.input_idx, c);
       app.input_idx += 1;
       app.input_cursor_position += compute_character_width(c);
     }
-    Key::Backspace | Key::Ctrl('h') => {
-      if !app.input.is_empty() && app.input_idx > 0 {
-        let last_c = app.input.remove(app.input_idx - 1);
-        app.input_idx -= 1;
-        app.input_cursor_position -= compute_character_width(last_c);
-      }
+    Key::Backspace | Key::Ctrl('h') if !app.input.is_empty() && app.input_idx > 0 => {
+      let last_c = app.input.remove(app.input_idx - 1);
+      app.input_idx -= 1;
+      app.input_cursor_position -= compute_character_width(last_c);
     }
-    Key::Delete | Key::Ctrl('d') => {
-      if !app.input.is_empty() && app.input_idx < app.input.len() {
-        app.input.remove(app.input_idx);
-      }
+    Key::Delete | Key::Ctrl('d') if !app.input.is_empty() && app.input_idx < app.input.len() => {
+      app.input.remove(app.input_idx);
     }
     _ => {}
   }
@@ -109,8 +104,19 @@ fn process_input(app: &mut App, input: String) {
     return;
   }
 
+  if let Some(query) = input
+    .strip_prefix("audiobook ")
+    .map(str::trim)
+    .filter(|query| !query.is_empty())
+  {
+    app.dispatch(IoEvent::LoadMedia(crate::media::Request::search(
+      query.into(),
+    )));
+    return;
+  }
+
   // Default fallback behavior: treat the input as a raw search phrase.
-  app.dispatch(IoEvent::GetSearchResults(input, app.get_user_country()));
+  app.dispatch(IoEvent::GetSearchResults(input));
   app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
 }
 
@@ -119,7 +125,7 @@ fn spotify_resource_id(base: &str, uri: &str, sep: &str, resource_type: &str) ->
   let id_string_with_query_params = uri.trim_start_matches(&uri_prefix);
   let query_idx = id_string_with_query_params
     .find('?')
-    .unwrap_or_else(|| id_string_with_query_params.len());
+    .unwrap_or(id_string_with_query_params.len());
   let id_string = id_string_with_query_params[0..query_idx].to_string();
   // If the lengths aren't equal, we must have found a match.
   let matched = id_string_with_query_params.len() != uri.len() && id_string.len() != uri.len();
@@ -153,6 +159,12 @@ fn attempt_process_uri(app: &mut App, input: &str, base: &str, sep: &str) -> boo
     return true;
   }
 
+  let (book_id, matched) = spotify_resource_id(base, input, sep, "audiobook");
+  if matched {
+    app.dispatch(IoEvent::OpenAudiobook(book_id));
+    return true;
+  }
+
   let (show_id, matched) = spotify_resource_id(base, input, sep, "show");
   if matched {
     app.dispatch(IoEvent::GetShow(show_id));
@@ -163,10 +175,7 @@ fn attempt_process_uri(app: &mut App, input: &str, base: &str, sep: &str) -> boo
 }
 
 fn compute_character_width(character: char) -> u16 {
-  UnicodeWidthChar::width(character)
-    .unwrap()
-    .try_into()
-    .unwrap()
+  UnicodeWidthChar::width(character).unwrap_or(0) as u16
 }
 
 #[cfg(test)]
@@ -175,6 +184,18 @@ mod tests {
 
   fn str_to_vec_char(s: &str) -> Vec<char> {
     String::from(s).chars().collect()
+  }
+
+  #[test]
+  fn input_is_bounded_and_control_characters_are_ignored() {
+    let mut app = App::default();
+    handler(Key::Char('\u{1b}'), &mut app);
+    assert!(app.input.is_empty());
+    for _ in 0..5000 {
+      handler(Key::Char('界'), &mut app);
+    }
+    assert_eq!(app.input.len(), 4096);
+    assert_eq!(app.input_cursor_position, 8192);
   }
 
   #[test]
@@ -406,7 +427,7 @@ mod tests {
     const URL_BASE: &str = "https://open.spotify.com/";
 
     fn check_uri_parse(expected_id: &str, parsed: (String, bool)) {
-      assert_eq!(parsed.1, true);
+      assert!(parsed.1);
       assert_eq!(parsed.0, expected_id);
     }
 
@@ -467,13 +488,13 @@ mod tests {
       let totally_wrong = "hehe-haha-3aNsrV6lkzmcU1w8u8kA7N";
       let random = "random string";
       let (_, matched) = spotify_resource_id(URI_BASE, swapped, ":", "track");
-      assert_eq!(matched, false);
+      assert!(!matched);
       let (_, matched) = spotify_resource_id(URI_BASE, totally_wrong, ":", "track");
-      assert_eq!(matched, false);
+      assert!(!matched);
       let (_, matched) = spotify_resource_id(URL_BASE, totally_wrong, "/", "track");
-      assert_eq!(matched, false);
+      assert!(!matched);
       let (_, matched) = spotify_resource_id(URL_BASE, random, "/", "track");
-      assert_eq!(matched, false);
+      assert!(!matched);
     }
 
     #[test]
@@ -486,12 +507,12 @@ mod tests {
       let expected_id = "1cJ6lPBYj2fscs0kqBHsVV";
 
       let (actual_id, matched) = spotify_resource_id(URL_BASE, playlist_url, "/", "playlist");
-      assert_eq!(matched, true);
+      assert!(matched);
       assert_eq!(actual_id, expected_id);
 
       let (actual_id, matched) =
         spotify_resource_id(URL_BASE, playlist_url_with_query, "/", "playlist");
-      assert_eq!(matched, true);
+      assert!(matched);
       assert_eq!(actual_id, expected_id);
     }
 
@@ -500,7 +521,7 @@ mod tests {
       let playlist_url =
         "https://open.spotify.com/playlist/1cJ6lPBYj2fscs0kqBHsVV?si=OdwuJsbsSeuUAOadehng3A";
       let (_, matched) = spotify_resource_id(URL_BASE, playlist_url, "/", "album");
-      assert_eq!(matched, false);
+      assert!(!matched);
     }
   }
 }

@@ -1,9 +1,9 @@
 use super::banner::BANNER;
-use anyhow::{anyhow, Error, Result};
+use anyhow::{Error, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::{
   fs,
-  io::{stdin, Write},
+  io::stdin,
   path::{Path, PathBuf},
 };
 
@@ -16,7 +16,6 @@ const TOKEN_CACHE_FILE: &str = ".spotify_token_cache.json";
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClientConfig {
   pub client_id: String,
-  pub client_secret: String,
   pub device_id: Option<String>,
   // FIXME: port should be defined in `user_config` not in here
   pub port: Option<u16>,
@@ -27,18 +26,23 @@ pub struct ConfigPaths {
   pub token_cache_path: PathBuf,
 }
 
+fn parse_client_config(input: &str) -> Result<ClientConfig> {
+  // Parser diagnostics can include neighboring source lines with an old secret.
+  crate::yaml::from_str(input)
+    .map_err(|_| anyhow!("Invalid client.yml; check the Client ID, device and port settings"))
+}
+
 impl ClientConfig {
   pub fn new() -> ClientConfig {
     ClientConfig {
       client_id: "".to_string(),
-      client_secret: "".to_string(),
       device_id: None,
       port: None,
     }
   }
 
   pub fn get_redirect_uri(&self) -> String {
-    format!("http://localhost:{}/callback", self.get_port())
+    format!("http://127.0.0.1:{}/callback", self.get_port())
   }
 
   pub fn get_port(&self) -> u16 {
@@ -56,9 +60,7 @@ impl ClientConfig {
           fs::create_dir(&home_config_dir)?;
         }
 
-        if !app_config_dir.exists() {
-          fs::create_dir(&app_config_dir)?;
-        }
+        crate::auth::private_directory(&app_config_dir)?;
 
         let config_file_path = &app_config_dir.join(FILE_NAME);
         let token_cache_path = &app_config_dir.join(TOKEN_CACHE_FILE);
@@ -76,28 +78,50 @@ impl ClientConfig {
 
   pub fn set_device_id(&mut self, device_id: String) -> Result<()> {
     let paths = self.get_or_build_paths()?;
-    let config_string = fs::read_to_string(&paths.config_file_path)?;
-    let mut config_yml: ClientConfig = serde_yaml::from_str(&config_string)?;
+    let config_string = String::from_utf8(crate::auth::read_private(
+      &paths.config_file_path,
+      crate::http::TOKEN_BODY_LIMIT,
+    )?)
+    .map_err(|_| anyhow!("Client settings are not UTF-8"))?;
+    let mut config_yml: ClientConfig = parse_client_config(&config_string)?;
 
     self.device_id = Some(device_id.clone());
     config_yml.device_id = Some(device_id);
 
     let new_config = serde_yaml::to_string(&config_yml)?;
-    let mut config_file = fs::File::create(&paths.config_file_path)?;
-    write!(config_file, "{}", new_config)?;
+    crate::auth::write_private(&paths.config_file_path, new_config.as_bytes())?;
     Ok(())
   }
 
   pub fn load_config(&mut self) -> Result<()> {
     let paths = self.get_or_build_paths()?;
     if paths.config_file_path.exists() {
-      let config_string = fs::read_to_string(&paths.config_file_path)?;
-      let config_yml: ClientConfig = serde_yaml::from_str(&config_string)?;
+      let config_string = String::from_utf8(crate::auth::read_private(
+        &paths.config_file_path,
+        crate::http::TOKEN_BODY_LIMIT,
+      )?)
+      .map_err(|_| anyhow!("Client settings are not UTF-8"))?;
+      let config_yml: ClientConfig = parse_client_config(&config_string)?;
 
+      Self::validate_client_key(&config_yml.client_id)?;
+      if config_yml.port == Some(0) {
+        return Err(anyhow!("Redirect port must be between 1 and 65535"));
+      }
       self.client_id = config_yml.client_id;
-      self.client_secret = config_yml.client_secret;
       self.device_id = config_yml.device_id;
       self.port = config_yml.port;
+      // Drop a legacy client_secret from disk; PKCE needs only the public ID.
+      if crate::yaml::from_str::<std::collections::BTreeMap<String, serde::de::IgnoredAny>>(
+        &config_string,
+      )
+      .map_err(|_| anyhow!("Invalid client.yml"))?
+      .contains_key("client_secret")
+      {
+        crate::auth::write_private(
+          &paths.config_file_path,
+          serde_yaml::to_string(self)?.as_bytes(),
+        )?;
+      }
 
       Ok(())
     } else {
@@ -111,44 +135,45 @@ impl ClientConfig {
       println!("\nHow to get setup:\n");
 
       let instructions = [
-        "Go to the Spotify dashboard - https://developer.spotify.com/dashboard/applications",
-        "Click `Create a Client ID` and create an app",
-        "Now click `Edit Settings`",
+        "Go to the Spotify dashboard - https://developer.spotify.com/dashboard",
+        "Create an app (Spotify Premium is required)",
+        "Open the app settings and enable Web API",
         &format!(
-          "Add `http://localhost:{}/callback` to the Redirect URIs",
+          "Add `http://127.0.0.1:{}/callback` to the Redirect URIs",
           DEFAULT_PORT
         ),
         "You are now ready to authenticate with Spotify!",
       ];
 
-      let mut number = 1;
-      for item in instructions.iter() {
+      for (number, item) in (1..).zip(instructions.iter()) {
         println!("  {}. {}", number, item);
-        number += 1;
       }
 
       let client_id = ClientConfig::get_client_key_from_input("Client ID")?;
-      let client_secret = ClientConfig::get_client_key_from_input("Client Secret")?;
 
       let mut port = String::new();
       println!("\nEnter port of redirect uri (default {}): ", DEFAULT_PORT);
       stdin().read_line(&mut port)?;
-      let port = port.trim().parse::<u16>().unwrap_or(DEFAULT_PORT);
+      let port = if port.trim().is_empty() {
+        DEFAULT_PORT
+      } else {
+        port.trim().parse::<u16>()?
+      };
+      if port == 0 {
+        return Err(anyhow!("Redirect port must be between 1 and 65535"));
+      }
 
       let config_yml = ClientConfig {
         client_id,
-        client_secret,
         device_id: None,
         port: Some(port),
       };
 
       let content_yml = serde_yaml::to_string(&config_yml)?;
 
-      let mut new_config = fs::File::create(&paths.config_file_path)?;
-      write!(new_config, "{}", content_yml)?;
+      crate::auth::write_private(&paths.config_file_path, content_yml.as_bytes())?;
 
       self.client_id = config_yml.client_id;
-      self.client_secret = config_yml.client_secret;
       self.device_id = config_yml.device_id;
       self.port = config_yml.port;
 
@@ -171,10 +196,10 @@ impl ClientConfig {
           client_key.clear();
           num_retries += 1;
           if num_retries == MAX_RETRIES {
-            return Err(Error::from(std::io::Error::new(
-              std::io::ErrorKind::Other,
-              format!("Maximum retries ({}) exceeded.", MAX_RETRIES),
-            )));
+            return Err(Error::from(std::io::Error::other(format!(
+              "Maximum retries ({}) exceeded.",
+              MAX_RETRIES
+            ))));
           }
         }
       };
@@ -188,7 +213,7 @@ impl ClientConfig {
         std::io::ErrorKind::InvalidInput,
         format!("invalid length: {} (must be {})", key.len(), EXPECTED_LEN,),
       )))
-    } else if !key.chars().all(|c| c.is_digit(16)) {
+    } else if !key.chars().all(|c| c.is_ascii_hexdigit()) {
       Err(Error::from(std::io::Error::new(
         std::io::ErrorKind::InvalidInput,
         "invalid character found (must be hex digits)",
@@ -196,5 +221,33 @@ impl ClientConfig {
     } else {
       Ok(())
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn credential_parse_errors_do_not_echo_secret_source_lines() {
+    let error =
+      parse_client_config("client_id: [bad]\nclient_secret: never-print-this\n").unwrap_err();
+    assert!(!format!("{error:?}").contains("never-print-this"));
+  }
+
+  #[test]
+  fn legacy_settings_load_without_requiring_or_serializing_a_secret() {
+    let config: ClientConfig = crate::yaml::from_str("client_id: 0123456789abcdef0123456789abcdef\nclient_secret: obsolete\ndevice_id: saved-device\nport: 9999\n").unwrap();
+    assert_eq!(config.device_id.as_deref(), Some("saved-device"));
+    assert_eq!(config.get_redirect_uri(), "http://127.0.0.1:9999/callback");
+    assert!(
+      !serde_yaml::to_string(&config)
+        .unwrap()
+        .contains("client_secret")
+    );
+    assert_eq!(
+      ClientConfig::new().get_redirect_uri(),
+      "http://127.0.0.1:8888/callback"
+    );
   }
 }

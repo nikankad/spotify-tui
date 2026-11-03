@@ -4,7 +4,7 @@ use super::{
 };
 use crate::event::Key;
 use crate::network::IoEvent;
-use rspotify::model::{context::CurrentlyPlaybackContext, PlayingItem};
+use crate::spotify::model::*;
 
 pub fn handler(key: Key, app: &mut App) {
   match key {
@@ -23,7 +23,7 @@ pub fn handler(key: Key, app: &mut App) {
             }
           }
           PlayingItem::Episode(episode) => {
-            app.dispatch(IoEvent::ToggleSaveTrack(episode.id));
+            app.dispatch(IoEvent::ToggleSavedItem(episode.uri));
           }
         };
       };
@@ -35,6 +35,22 @@ pub fn handler(key: Key, app: &mut App) {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn saving_a_podcast_uses_its_episode_uri() {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let mut app = App::new(tx, crate::user_config::UserConfig::new());
+    app.current_playback_context = Some(
+      serde_json::from_value(serde_json::json!({
+        "item":{"type":"episode","id":"episode","uri":"spotify:episode:episode"}
+      }))
+      .unwrap(),
+    );
+    handler(Key::Char('s'), &mut app);
+    assert!(
+      matches!(rx.try_recv().unwrap(), IoEvent::ToggleSavedItem(uri) if uri == "spotify:episode:episode")
+    );
+  }
 
   #[test]
   fn on_left_press() {

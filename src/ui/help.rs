@@ -3,6 +3,26 @@ use crate::user_config::KeyBindings;
 pub fn get_help_docs(key_bindings: &KeyBindings) -> Vec<Vec<String>> {
   vec![
     vec![
+      "Refresh queue, episodes or audiobooks".into(),
+      "F5".into(),
+      "Media views".into(),
+    ],
+    vec![
+      "Save/remove selected track, episode or audiobook".into(),
+      "s".into(),
+      "Media views".into(),
+    ],
+    vec![
+      "Open selected item in Spotify".into(),
+      "O".into(),
+      "Media views".into(),
+    ],
+    vec![
+      "Save/remove episode (separate from following its show)".into(),
+      "w".into(),
+      "Podcast episodes".into(),
+    ],
+    vec![
       String::from("Scroll down to next result page"),
       key_bindings.next_page.to_string(),
       String::from("Pagination"),
@@ -138,11 +158,6 @@ pub fn get_help_docs(key_bindings: &KeyBindings) -> Vec<Vec<String>> {
       String::from("General"),
     ],
     vec![
-      String::from("Go to audio analysis screen"),
-      key_bindings.audio_analysis.to_string(),
-      String::from("General"),
-    ],
-    vec![
       String::from("Go to playbar only screen (basic view)"),
       key_bindings.basic_view.to_string(),
       String::from("General"),
@@ -171,16 +186,6 @@ pub fn get_help_docs(key_bindings: &KeyBindings) -> Vec<Vec<String>> {
       String::from("Start playback or enter album/artist/playlist"),
       key_bindings.submit.to_string(),
       String::from("Selected block"),
-    ],
-    vec![
-      String::from("Play recommendations for song/artist"),
-      String::from("r"),
-      String::from("Selected block"),
-    ],
-    vec![
-      String::from("Play all tracks for artist"),
-      String::from("e"),
-      String::from("Library -> Artists"),
     ],
     vec![
       String::from("Search with input text"),

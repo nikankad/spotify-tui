@@ -1,5 +1,5 @@
 use super::{super::app::App, common_key_events};
-use crate::{app::RecommendationsContext, event::Key, network::IoEvent};
+use crate::{event::Key, network::IoEvent};
 
 pub fn handler(key: Key, app: &mut App) {
   match key {
@@ -41,12 +41,11 @@ pub fn handler(key: Key, app: &mut App) {
       }
     }
     Key::Char('s') => {
-      if let Some(recently_played_result) = &app.recently_played.result.clone() {
-        if let Some(selected_track) = recently_played_result.items.get(app.recently_played.index) {
-          if let Some(track_id) = &selected_track.track.id {
-            app.dispatch(IoEvent::ToggleSaveTrack(track_id.to_string()));
-          };
-        };
+      if let Some(recently_played_result) = &app.recently_played.result.clone()
+        && let Some(selected_track) = recently_played_result.items.get(app.recently_played.index)
+        && let Some(track_id) = &selected_track.track.id
+      {
+        app.dispatch(IoEvent::ToggleSaveTrack(track_id.to_string()));
       };
     }
     Key::Enter => {
@@ -64,25 +63,12 @@ pub fn handler(key: Key, app: &mut App) {
         ));
       };
     }
-    Key::Char('r') => {
-      if let Some(recently_played_result) = &app.recently_played.result.clone() {
-        let selected_track_history_item =
-          recently_played_result.items.get(app.recently_played.index);
 
-        if let Some(item) = selected_track_history_item {
-          if let Some(id) = &item.track.id {
-            app.recommendations_context = Some(RecommendationsContext::Song);
-            app.recommendations_seed = item.track.name.clone();
-            app.get_recommendations_for_track_id(id.to_string());
-          }
-        }
-      }
-    }
     _ if key == app.user_config.keys.add_item_to_queue => {
-      if let Some(recently_played_result) = &app.recently_played.result.clone() {
-        if let Some(history) = recently_played_result.items.get(app.recently_played.index) {
-          app.dispatch(IoEvent::AddItemToQueue(history.track.uri.clone()))
-        }
+      if let Some(recently_played_result) = &app.recently_played.result.clone()
+        && let Some(history) = recently_played_result.items.get(app.recently_played.index)
+      {
+        app.dispatch(IoEvent::AddItemToQueue(history.track.uri.clone()))
       };
     }
     _ => {}

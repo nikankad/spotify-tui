@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Added
+
+- Offline development mode (`--dev`, alias `--demo`) with a populated sample
+  library, search, queue, devices and simulated playback and save operations.
+  Sessions require no login and leave saved settings untouched.
+- Queue browsing for tracks and episodes, including a `queue --json` command.
+- Saved podcast episodes, save/remove controls, and resume playback in the TUI
+  and the `episodes` command.
+- Saved audiobooks, catalogue search, chapter browsing and Spotify links in the
+  TUI and the `audiobooks` command.
+- Device volume capability handling.
+
+### Changed
+
+- Update the terminal, runtime, HTTP, CLI, YAML and clipboard dependencies for 2026.
+- Use PKCE authentication and an IP loopback callback; no client secret is needed.
+- Migrate playlist and library requests to the current Spotify endpoints.
+- Accept reduced Spotify metadata and both playlist response formats.
+- Limit search to 10 results per type and combine search requests.
+- Respect rate-limit cooldowns and report exhausted development quota.
+- Refresh tokens for both CLI and terminal sessions.
+- Update setup docs, cross-platform CI and macOS release architectures.
+- Harden credential files, OAuth callback handling, HTTPS transport, terminal
+  text and configuration parsing.
+- Bound response buffers, event queues, page caches and navigation history;
+  share one runtime and HTTP pool and avoid redundant object clones.
+- Reduce release binary size and pin workflow actions to immutable commits.
+
+### Removed
+
+- Audio analysis, recommendations, related artists, artist top tracks and
+  Made for You discovery, which are unavailable to current personal apps.
+- The old RSpotify/Tokio 0.2 transport and OpenSSL 1.1 build requirements.
+
 - Fix confirmation dialog handling on playlist delete [#910](https://github.com/Rigellute/spotify-tui/pull/910)
 
 ### Added

@@ -1,5 +1,5 @@
 use crate::event::Key;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::{
   fs,
@@ -31,8 +31,6 @@ pub struct UserTheme {
 
 #[derive(Copy, Clone, Debug)]
 pub struct Theme {
-  pub analysis_bar: Color,
-  pub analysis_bar_text: Color,
   pub active: Color,
   pub banner: Color,
   pub error_border: Color,
@@ -52,8 +50,6 @@ pub struct Theme {
 impl Default for Theme {
   fn default() -> Self {
     Theme {
-      analysis_bar: Color::LightCyan,
-      analysis_bar_text: Color::Reset,
       active: Color::Cyan,
       banner: Color::LightCyan,
       error_border: Color::Red,
@@ -73,42 +69,35 @@ impl Default for Theme {
 }
 
 fn parse_key(key: String) -> Result<Key> {
-  fn get_single_char(string: &str) -> char {
-    match string.chars().next() {
-      Some(c) => c,
-      None => panic!(),
+  fn single(text: &str) -> Result<char> {
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+      (Some(character), None) if !character.is_control() => Ok(character),
+      _ => Err(anyhow!("A shortcut must contain exactly one character")),
     }
   }
-
-  match key.len() {
-    1 => Ok(Key::Char(get_single_char(key.as_str()))),
-    _ => {
-      let sections: Vec<&str> = key.split('-').collect();
-
-      if sections.len() > 2 {
-        return Err(anyhow!(
-          "Shortcut can only have 2 keys, \"{}\" has {}",
-          key,
-          sections.len()
-        ));
-      }
-
-      match sections[0].to_lowercase().as_str() {
-        "ctrl" => Ok(Key::Ctrl(get_single_char(sections[1]))),
-        "alt" => Ok(Key::Alt(get_single_char(sections[1]))),
-        "left" => Ok(Key::Left),
-        "right" => Ok(Key::Right),
-        "up" => Ok(Key::Up),
-        "down" => Ok(Key::Down),
-        "backspace" | "delete" => Ok(Key::Backspace),
-        "del" => Ok(Key::Delete),
-        "esc" | "escape" => Ok(Key::Esc),
-        "pageup" => Ok(Key::PageUp),
-        "pagedown" => Ok(Key::PageDown),
-        "space" => Ok(Key::Char(' ')),
-        _ => Err(anyhow!("The key \"{}\" is unknown.", sections[0])),
-      }
-    }
+  if let Ok(character) = single(&key) {
+    return Ok(Key::Char(character));
+  }
+  if let Some((modifier, character)) = key.split_once('-') {
+    return match modifier.to_ascii_lowercase().as_str() {
+      "ctrl" => Ok(Key::Ctrl(single(character)?)),
+      "alt" => Ok(Key::Alt(single(character)?)),
+      _ => Err(anyhow!("Unknown shortcut modifier")),
+    };
+  }
+  match key.to_ascii_lowercase().as_str() {
+    "left" => Ok(Key::Left),
+    "right" => Ok(Key::Right),
+    "up" => Ok(Key::Up),
+    "down" => Ok(Key::Down),
+    "backspace" | "delete" => Ok(Key::Backspace),
+    "del" => Ok(Key::Delete),
+    "esc" | "escape" => Ok(Key::Esc),
+    "pageup" => Ok(Key::PageUp),
+    "pagedown" => Ok(Key::PageDown),
+    "space" => Ok(Key::Char(' ')),
+    _ => Err(anyhow!("Unknown shortcut name")),
   }
 }
 
@@ -170,7 +159,6 @@ pub struct KeyBindingsString {
   submit: Option<String>,
   copy_song_url: Option<String>,
   copy_album_url: Option<String>,
-  audio_analysis: Option<String>,
   basic_view: Option<String>,
   add_item_to_queue: Option<String>,
 }
@@ -200,7 +188,6 @@ pub struct KeyBindings {
   pub submit: Key,
   pub copy_song_url: Key,
   pub copy_album_url: Key,
-  pub audio_analysis: Key,
   pub basic_view: Key,
   pub add_item_to_queue: Key,
 }
@@ -282,7 +269,6 @@ impl UserConfig {
         submit: Key::Enter,
         copy_song_url: Key::Char('c'),
         copy_album_url: Key::Char('C'),
-        audio_analysis: Key::Char('v'),
         basic_view: Key::Char('B'),
         add_item_to_queue: Key::Char('z'),
       },
@@ -365,7 +351,6 @@ impl UserConfig {
     to_keys!(submit);
     to_keys!(copy_song_url);
     to_keys!(copy_album_url);
-    to_keys!(audio_analysis);
     to_keys!(basic_view);
     to_keys!(add_item_to_queue);
 
@@ -414,8 +399,8 @@ impl UserConfig {
     }
 
     if let Some(tick_rate) = behavior_config.tick_rate_milliseconds {
-      if tick_rate >= 1000 {
-        return Err(anyhow!("Tick rate must be below 1000"));
+      if !(1..1000).contains(&tick_rate) {
+        return Err(anyhow!("Tick rate must be between 1 and 999 milliseconds"));
       } else {
         self.behavior.tick_rate_milliseconds = tick_rate;
       }
@@ -473,13 +458,24 @@ impl UserConfig {
       }
     };
     if paths.config_file_path.exists() {
-      let config_string = fs::read_to_string(&paths.config_file_path)?;
+      let file = fs::File::open(&paths.config_file_path)?;
+      if file.metadata()?.len() > 1024 * 1024 {
+        return Err(anyhow!("Configuration exceeds 1 MiB"));
+      }
+      use std::io::Read;
+      let mut config_string = String::new();
+      file
+        .take(1024 * 1024 + 1)
+        .read_to_string(&mut config_string)?;
+      if config_string.len() > 1024 * 1024 {
+        return Err(anyhow!("Configuration exceeds 1 MiB"));
+      }
       // serde fails if file is empty
       if config_string.trim().is_empty() {
         return Ok(());
       }
 
-      let config_yml: UserConfigString = serde_yaml::from_str(&config_string)?;
+      let config_yml: UserConfigString = crate::yaml::from_str(&config_string)?;
 
       if let Some(keybindings) = config_yml.keybindings.clone() {
         self.load_keybindings(keybindings)?;
@@ -524,15 +520,14 @@ fn parse_theme_item(theme_item: &str) -> Result<Color> {
     "White" => Color::White,
     _ => {
       let colors = theme_item.split(',').collect::<Vec<&str>>();
-      if let (Some(r), Some(g), Some(b)) = (colors.get(0), colors.get(1), colors.get(2)) {
+      if let (Some(r), Some(g), Some(b)) = (colors.first(), colors.get(1), colors.get(2)) {
         Color::Rgb(
           r.trim().parse::<u8>()?,
           g.trim().parse::<u8>()?,
           b.trim().parse::<u8>()?,
         )
       } else {
-        println!("Unexpected color {}", theme_item);
-        Color::Black
+        return Err(anyhow!("Expected a named color or three RGB components"));
       }
     }
   };
@@ -542,6 +537,17 @@ fn parse_theme_item(theme_item: &str) -> Result<Color> {
 
 #[cfg(test)]
 mod tests {
+  #[test]
+  fn malformed_shortcuts_return_errors_instead_of_panicking() {
+    for key in ["", "ctrl", "alt", "ctrl-", "alt-", "ctrl-two", "ctrl-alt-x"] {
+      assert!(super::parse_key(key.into()).is_err(), "{key}");
+    }
+    assert_eq!(
+      super::parse_key("é".into()).unwrap(),
+      crate::event::Key::Char('é')
+    );
+  }
+
   #[test]
   fn test_parse_key() {
     use super::parse_key;

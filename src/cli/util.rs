@@ -1,11 +1,6 @@
+use crate::spotify::RepeatState;
+use crate::spotify::model::*;
 use clap::ArgMatches;
-use rspotify::{
-  model::{
-    album::SimplifiedAlbum, artist::FullArtist, artist::SimplifiedArtist,
-    playlist::SimplifiedPlaylist, show::FullEpisode, show::SimplifiedShow, track::FullTrack,
-  },
-  senum::RepeatState,
-};
 
 use crate::user_config::UserConfig;
 
@@ -22,16 +17,16 @@ pub enum Type {
 }
 
 impl Type {
-  pub fn play_from_matches(m: &ArgMatches<'_>) -> Self {
-    if m.is_present("playlist") {
+  pub fn play_from_matches(m: &ArgMatches) -> Self {
+    if m.get_flag("playlist") {
       Self::Playlist
-    } else if m.is_present("track") {
+    } else if m.get_flag("track") {
       Self::Track
-    } else if m.is_present("artist") {
+    } else if m.get_flag("artist") {
       Self::Artist
-    } else if m.is_present("album") {
+    } else if m.get_flag("album") {
       Self::Album
-    } else if m.is_present("show") {
+    } else if m.get_flag("show") {
       Self::Show
     }
     // Enforced by clap
@@ -40,16 +35,16 @@ impl Type {
     }
   }
 
-  pub fn search_from_matches(m: &ArgMatches<'_>) -> Self {
-    if m.is_present("playlists") {
+  pub fn search_from_matches(m: &ArgMatches) -> Self {
+    if m.get_flag("playlists") {
       Self::Playlist
-    } else if m.is_present("tracks") {
+    } else if m.get_flag("tracks") {
       Self::Track
-    } else if m.is_present("artists") {
+    } else if m.get_flag("artists") {
       Self::Artist
-    } else if m.is_present("albums") {
+    } else if m.get_flag("albums") {
       Self::Album
-    } else if m.is_present("shows") {
+    } else if m.get_flag("shows") {
       Self::Show
     }
     // Enforced by clap
@@ -58,12 +53,12 @@ impl Type {
     }
   }
 
-  pub fn list_from_matches(m: &ArgMatches<'_>) -> Self {
-    if m.is_present("playlists") {
+  pub fn list_from_matches(m: &ArgMatches) -> Self {
+    if m.get_flag("playlists") {
       Self::Playlist
-    } else if m.is_present("devices") {
+    } else if m.get_flag("devices") {
       Self::Device
-    } else if m.is_present("liked") {
+    } else if m.get_flag("liked") {
       Self::Liked
     }
     // Enforced by clap
@@ -87,21 +82,21 @@ pub enum Flag {
 }
 
 impl Flag {
-  pub fn from_matches(m: &ArgMatches<'_>) -> Vec<Self> {
+  pub fn from_matches(m: &ArgMatches) -> Vec<Self> {
     // Multiple flags are possible
     let mut flags = Vec::new();
 
     // Only one of these two
-    if m.is_present("like") {
+    if m.get_flag("like") {
       flags.push(Self::Like(true));
-    } else if m.is_present("dislike") {
+    } else if m.get_flag("dislike") {
       flags.push(Self::Like(false));
     }
 
-    if m.is_present("shuffle") {
+    if m.get_flag("shuffle") {
       flags.push(Self::Shuffle);
     }
-    if m.is_present("repeat") {
+    if m.get_flag("repeat") {
       flags.push(Self::Repeat);
     }
     flags
@@ -115,11 +110,11 @@ pub enum JumpDirection {
 }
 
 impl JumpDirection {
-  pub fn from_matches(m: &ArgMatches<'_>) -> (Self, u64) {
-    if m.is_present("next") {
-      (Self::Next, m.occurrences_of("next"))
-    } else if m.is_present("previous") {
-      (Self::Previous, m.occurrences_of("previous"))
+  pub fn from_matches(m: &ArgMatches) -> (Self, u64) {
+    if m.get_count("next") > 0 {
+      (Self::Next, m.get_count("next").into())
+    } else if m.get_count("previous") > 0 {
+      (Self::Previous, m.get_count("previous").into())
     // Enforced by clap
     } else {
       unreachable!()

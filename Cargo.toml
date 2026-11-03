@@ -1,35 +1,54 @@
 [package]
 name = "spotify-tui"
 description = "A terminal user interface for Spotify"
-homepage = "https://github.com/Rigellute/spotify-tui"
-documentation = "https://github.com/Rigellute/spotify-tui"
-repository = "https://github.com/Rigellute/spotify-tui"
+homepage = "https://github.com/nikankad/spotify-tui"
+documentation = "https://github.com/nikankad/spotify-tui"
+repository = "https://github.com/nikankad/spotify-tui"
 keywords = ["spotify", "tui", "cli", "terminal"]
 categories = ["command-line-utilities"]
 version = "0.25.0"
 authors = ["Alexander Keliris <rigellute@gmail.com>"]
-edition = "2018"
+edition = "2024"
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rspotify = "0.10.0"
-tui = { version = "0.16.0", features = ["crossterm"], default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+base64 = "0.22"
+sha2 = "0.10"
+url = "2.5"
+webbrowser = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+tui = { package = "ratatui", version = "0.30", features = ["crossterm"], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.8"
-dirs = "3.0.2"
-clap = "2.33.3"
-unicode-width = "0.1.8"
-backtrace = "0.3.57"
-arboard = "1.2.0"
-crossterm = "0.20"
-tokio = { version = "0.2", features = ["full"] }
-rand = "0.8.4"
-anyhow = "1.0.43"
+serde_yaml = { package = "serde-saphyr", version = "2.1", default-features = false, features = ["serialize", "deserialize"] }
+dirs = "6"
+clap = "4.5"
+clap_complete = "4.5"
+unicode-width = "0.2"
+arboard = { version = "3.6", default-features = false }
+crossterm = "0.29"
+tokio = { version = "1.48", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+getrandom = "0.4"
+fastrand = "2"
+anyhow = "1.0"
+
+[dev-dependencies]
+tempfile = "3"
 
 [[bin]]
 bench = false
 path = "src/main.rs"
 name = "spt"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
