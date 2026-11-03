@@ -50,6 +50,26 @@ pub fn handler(key: Key, app: &mut App) {
     k if k == app.user_config.keys.previous_page => handle_prev_event(app),
     Key::Char('S') => toggle_sort_by_date(app),
     Key::Char('s') => handle_follow_event(app),
+    Key::Char('w') => {
+      if let Some(episode) = app
+        .library
+        .show_episodes
+        .get_results(None)
+        .and_then(|page| page.items.get(app.episode_list_index))
+      {
+        app.dispatch(IoEvent::ToggleSavedItem(episode.uri.clone()));
+      }
+    }
+    k if k == app.user_config.keys.add_item_to_queue => {
+      if let Some(episode) = app
+        .library
+        .show_episodes
+        .get_results(None)
+        .and_then(|page| page.items.get(app.episode_list_index))
+      {
+        app.dispatch(IoEvent::AddItemToQueue(episode.uri.clone()));
+      }
+    }
     Key::Char('D') => handle_unfollow_event(app),
     Key::Ctrl('e') => jump_to_end(app),
     Key::Ctrl('a') => jump_to_start(app),
@@ -59,7 +79,7 @@ pub fn handler(key: Key, app: &mut App) {
 
 fn jump_to_end(app: &mut App) {
   if let Some(episodes) = app.library.show_episodes.get_results(None) {
-    let last_idx = episodes.items.len() - 1;
+    let last_idx = episodes.items.len().saturating_sub(1);
     app.episode_list_index = last_idx;
   }
 }

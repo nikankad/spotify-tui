@@ -1,6 +1,6 @@
-use super::super::app::{ActiveBlock, App, ArtistBlock, SearchResultBlock};
+use super::super::app::{ActiveBlock, App, SearchResultBlock};
+use crate::spotify::model::*;
 use crate::user_config::Theme;
-use rspotify::model::artist::SimplifiedArtist;
 use tui::style::Style;
 
 pub const BASIC_VIEW_HEIGHT: u16 = 6;
@@ -17,18 +17,6 @@ pub fn get_search_results_highlight_state(
     current_route.hovered_block == ActiveBlock::SearchResultBlock
       && app.search_results.hovered_block == block_to_match,
   )
-}
-
-pub fn get_artist_highlight_state(app: &App, block_to_match: ArtistBlock) -> (bool, bool) {
-  let current_route = app.get_current_route();
-  if let Some(artist) = &app.artist {
-    let is_hovered = artist.artist_selected_block == block_to_match;
-    let is_selected = current_route.hovered_block == ActiveBlock::ArtistBlock
-      && artist.artist_hovered_block == block_to_match;
-    (is_hovered, is_selected)
-  } else {
-    (false, false)
-  }
 }
 
 pub fn get_color((is_active, is_hovered): (bool, bool), theme: Theme) -> Style {
@@ -74,7 +62,7 @@ pub fn display_track_progress(progress: u128, track_duration: u32) -> String {
 // `percentage` param needs to be between 0 and 1
 pub fn get_percentage_width(width: u16, percentage: f32) -> u16 {
   let padding = 3;
-  let width = width - padding;
+  let width = width.saturating_sub(padding);
   (f32::from(width) * percentage) as u16
 }
 

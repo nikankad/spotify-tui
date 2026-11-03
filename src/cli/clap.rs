@@ -1,19 +1,28 @@
-use clap::{App, Arg, ArgGroup, SubCommand};
+use clap::{Arg, ArgAction, ArgGroup, Command};
 
-fn device_arg() -> Arg<'static, 'static> {
-  Arg::with_name("device")
-    .short("d")
+pub fn development_mode_arg() -> Arg {
+  Arg::new("dev")
+    .long("dev")
+    .visible_alias("demo")
+    .global(true)
+    .action(ArgAction::SetTrue)
+    .help("Use offline sample data without logging in or changing saved settings")
+}
+
+fn device_arg() -> Arg {
+  Arg::new("device")
+    .short('d')
     .long("device")
-    .takes_value(true)
+    .num_args(1)
     .value_name("DEVICE")
     .help("Specifies the spotify device to use")
 }
 
-fn format_arg() -> Arg<'static, 'static> {
-  Arg::with_name("format")
-    .short("f")
+fn format_arg() -> Arg {
+  Arg::new("format")
+    .short('f')
     .long("format")
-    .takes_value(true)
+    .num_args(1)
     .value_name("FORMAT")
     .help("Specifies the output format")
     .long_help(
@@ -23,8 +32,8 @@ Example: spt pb -s -f 'playing on %d at %v%'",
     )
 }
 
-pub fn playback_subcommand() -> App<'static, 'static> {
-  SubCommand::with_name("playback")
+pub fn playback_subcommand() -> Command {
+  Command::new("playback")
     .version(env!("CARGO_PKG_VERSION"))
     .author(env!("CARGO_PKG_AUTHORS"))
     .about("Interacts with the playback of a device")
@@ -47,66 +56,86 @@ can be used together
     .arg(
       format_arg()
         .default_value("%f %s %t - %a")
-        .default_value_ifs(&[
-          ("seek", None, "%f %s %t - %a %r"),
-          ("volume", None, "%v% %f %s %t - %a"),
-          ("transfer", None, "%f %s %t - %a on %d"),
+        .default_value_ifs([
+          (
+            "seek",
+            clap::builder::ArgPredicate::IsPresent,
+            "%f %s %t - %a %r",
+          ),
+          (
+            "volume",
+            clap::builder::ArgPredicate::IsPresent,
+            "%v% %f %s %t - %a",
+          ),
+          (
+            "transfer",
+            clap::builder::ArgPredicate::IsPresent,
+            "%f %s %t - %a on %d",
+          ),
         ]),
     )
     .arg(
-      Arg::with_name("toggle")
-        .short("t")
+      Arg::new("toggle")
+        .action(ArgAction::SetTrue)
+        .short('t')
         .long("toggle")
         .help("Pauses/resumes the playback of a device"),
     )
     .arg(
-      Arg::with_name("status")
-        .short("s")
+      Arg::new("status")
+        .action(ArgAction::SetTrue)
+        .short('s')
         .long("status")
         .help("Prints out the current status of a device (default)"),
     )
     .arg(
-      Arg::with_name("share-track")
+      Arg::new("share-track")
+        .action(ArgAction::SetTrue)
         .long("share-track")
         .help("Returns the url to the current track"),
     )
     .arg(
-      Arg::with_name("share-album")
+      Arg::new("share-album")
+        .action(ArgAction::SetTrue)
         .long("share-album")
         .help("Returns the url to the album of the current track"),
     )
     .arg(
-      Arg::with_name("transfer")
+      Arg::new("transfer")
         .long("transfer")
-        .takes_value(true)
+        .num_args(1)
         .value_name("DEVICE")
         .help("Transfers the playback to new DEVICE"),
     )
     .arg(
-      Arg::with_name("like")
+      Arg::new("like")
+        .action(ArgAction::SetTrue)
         .long("like")
         .help("Likes the current song if possible"),
     )
     .arg(
-      Arg::with_name("dislike")
+      Arg::new("dislike")
+        .action(ArgAction::SetTrue)
         .long("dislike")
         .help("Dislikes the current song if possible"),
     )
     .arg(
-      Arg::with_name("shuffle")
+      Arg::new("shuffle")
+        .action(ArgAction::SetTrue)
         .long("shuffle")
         .help("Toggles shuffle mode"),
     )
     .arg(
-      Arg::with_name("repeat")
+      Arg::new("repeat")
+        .action(ArgAction::SetTrue)
         .long("repeat")
         .help("Switches between repeat modes"),
     )
     .arg(
-      Arg::with_name("next")
-        .short("n")
+      Arg::new("next")
+        .short('n')
         .long("next")
-        .multiple(true)
+        .action(ArgAction::Count)
         .help("Jumps to the next song")
         .long_help(
           "This jumps to the next song if specied once. If you want to jump, let's say 3 songs \
@@ -114,10 +143,10 @@ forward, you can use `--next` 3 times: `spt pb -nnn`.",
         ),
     )
     .arg(
-      Arg::with_name("previous")
-        .short("p")
+      Arg::new("previous")
+        .short('p')
         .long("previous")
-        .multiple(true)
+        .action(ArgAction::Count)
         .help("Jumps to the previous song")
         .long_help(
           "This jumps to the beginning of the current song if specied once. You probably want to \
@@ -126,9 +155,9 @@ two songs back, you can use `spt pb -ppp` and so on.",
         ),
     )
     .arg(
-      Arg::with_name("seek")
+      Arg::new("seek")
         .long("seek")
-        .takes_value(true)
+        .num_args(1)
         .value_name("±SECONDS")
         .allow_hyphen_values(true)
         .help("Jumps SECONDS forwards (+) or backwards (-)")
@@ -138,46 +167,46 @@ seconds backwards and `spt pb --seek 10` to the tenth second of the track.",
         ),
     )
     .arg(
-      Arg::with_name("volume")
-        .short("v")
+      Arg::new("volume")
+        .short('v')
         .long("volume")
-        .takes_value(true)
+        .num_args(1)
         .value_name("VOLUME")
         .help("Sets the volume of a device to VOLUME (1 - 100)"),
     )
     .group(
-      ArgGroup::with_name("jumps")
-        .args(&["next", "previous"])
+      ArgGroup::new("jumps")
+        .args(["next", "previous"])
         .multiple(false)
-        .conflicts_with_all(&["single", "flags", "actions"]),
+        .conflicts_with_all(["single", "flags", "actions"]),
     )
     .group(
-      ArgGroup::with_name("likes")
-        .args(&["like", "dislike"])
+      ArgGroup::new("likes")
+        .args(["like", "dislike"])
         .multiple(false),
     )
     .group(
-      ArgGroup::with_name("flags")
-        .args(&["like", "dislike", "shuffle", "repeat"])
+      ArgGroup::new("flags")
+        .args(["like", "dislike", "shuffle", "repeat"])
         .multiple(true)
-        .conflicts_with_all(&["single", "jumps"]),
+        .conflicts_with_all(["single", "jumps"]),
     )
     .group(
-      ArgGroup::with_name("actions")
-        .args(&["toggle", "status", "transfer", "volume"])
+      ArgGroup::new("actions")
+        .args(["toggle", "status", "transfer", "volume"])
         .multiple(true)
-        .conflicts_with_all(&["single", "jumps"]),
+        .conflicts_with_all(["single", "jumps"]),
     )
     .group(
-      ArgGroup::with_name("single")
-        .args(&["share-track", "share-album"])
+      ArgGroup::new("single")
+        .args(["share-track", "share-album"])
         .multiple(false)
-        .conflicts_with_all(&["actions", "flags", "jumps"]),
+        .conflicts_with_all(["actions", "flags", "jumps"]),
     )
 }
 
-pub fn play_subcommand() -> App<'static, 'static> {
-  SubCommand::with_name("play")
+pub fn play_subcommand() -> Command {
+  Command::new("play")
     .version(env!("CARGO_PKG_VERSION"))
     .author(env!("CARGO_PKG_AUTHORS"))
     .about("Plays a uri or another spotify item by name")
@@ -193,83 +222,90 @@ The same function as found in `playback` will be called.",
     .arg(device_arg())
     .arg(format_arg().default_value("%f %s %t - %a"))
     .arg(
-      Arg::with_name("uri")
-        .short("u")
+      Arg::new("uri")
+        .short('u')
         .long("uri")
-        .takes_value(true)
+        .num_args(1)
         .value_name("URI")
         .help("Plays the URI"),
     )
     .arg(
-      Arg::with_name("name")
-        .short("n")
+      Arg::new("name")
+        .short('n')
         .long("name")
-        .takes_value(true)
+        .num_args(1)
         .value_name("NAME")
         .requires("contexts")
         .help("Plays the first match with NAME from the specified category"),
     )
     .arg(
-      Arg::with_name("queue")
-        .short("q")
+      Arg::new("queue")
+        .action(ArgAction::SetTrue)
+        .short('q')
         .long("queue")
         // Only works with tracks
-        .conflicts_with_all(&["album", "artist", "playlist", "show"])
+        .conflicts_with_all(["album", "artist", "playlist", "show"])
         .help("Adds track to queue instead of playing it directly"),
     )
     .arg(
-      Arg::with_name("random")
-        .short("r")
+      Arg::new("random")
+        .action(ArgAction::SetTrue)
+        .short('r')
         .long("random")
         // Only works with playlists
-        .conflicts_with_all(&["track", "album", "artist", "show"])
+        .conflicts_with_all(["track", "album", "artist", "show"])
         .help("Plays a random track (only works with playlists)"),
     )
     .arg(
-      Arg::with_name("album")
-        .short("b")
+      Arg::new("album")
+        .action(ArgAction::SetTrue)
+        .short('b')
         .long("album")
         .help("Looks for an album"),
     )
     .arg(
-      Arg::with_name("artist")
-        .short("a")
+      Arg::new("artist")
+        .action(ArgAction::SetTrue)
+        .short('a')
         .long("artist")
         .help("Looks for an artist"),
     )
     .arg(
-      Arg::with_name("track")
-        .short("t")
+      Arg::new("track")
+        .action(ArgAction::SetTrue)
+        .short('t')
         .long("track")
         .help("Looks for a track"),
     )
     .arg(
-      Arg::with_name("show")
-        .short("w")
+      Arg::new("show")
+        .action(ArgAction::SetTrue)
+        .short('w')
         .long("show")
         .help("Looks for a show"),
     )
     .arg(
-      Arg::with_name("playlist")
-        .short("p")
+      Arg::new("playlist")
+        .action(ArgAction::SetTrue)
+        .short('p')
         .long("playlist")
         .help("Looks for a playlist"),
     )
     .group(
-      ArgGroup::with_name("contexts")
-        .args(&["track", "artist", "playlist", "album", "show"])
+      ArgGroup::new("contexts")
+        .args(["track", "artist", "playlist", "album", "show"])
         .multiple(false),
     )
     .group(
-      ArgGroup::with_name("actions")
-        .args(&["uri", "name"])
+      ArgGroup::new("actions")
+        .args(["uri", "name"])
         .multiple(false)
         .required(true),
     )
 }
 
-pub fn list_subcommand() -> App<'static, 'static> {
-  SubCommand::with_name("list")
+pub fn list_subcommand() -> Command {
+  Command::new("list")
     .version(env!("CARGO_PKG_VERSION"))
     .author(env!("CARGO_PKG_AUTHORS"))
     .about("Lists devices, liked songs and playlists")
@@ -280,108 +316,219 @@ even more awesome, get your output exactly the way you want. The format option w
 be applied to every item found.",
     )
     .visible_alias("l")
-    .arg(format_arg().default_value_ifs(&[
-      ("devices", None, "%v% %d"),
-      ("liked", None, "%t - %a (%u)"),
-      ("playlists", None, "%p (%u)"),
+    .arg(format_arg().default_value_ifs([
+      ("devices", clap::builder::ArgPredicate::IsPresent, "%v% %d"),
+      (
+        "liked",
+        clap::builder::ArgPredicate::IsPresent,
+        "%t - %a (%u)",
+      ),
+      (
+        "playlists",
+        clap::builder::ArgPredicate::IsPresent,
+        "%p (%u)",
+      ),
     ]))
     .arg(
-      Arg::with_name("devices")
-        .short("d")
+      Arg::new("devices")
+        .action(ArgAction::SetTrue)
+        .short('d')
         .long("devices")
         .help("Lists devices"),
     )
     .arg(
-      Arg::with_name("playlists")
-        .short("p")
+      Arg::new("playlists")
+        .action(ArgAction::SetTrue)
+        .short('p')
         .long("playlists")
         .help("Lists playlists"),
     )
     .arg(
-      Arg::with_name("liked")
+      Arg::new("liked")
+        .action(ArgAction::SetTrue)
         .long("liked")
         .help("Lists liked songs"),
     )
     .arg(
-      Arg::with_name("limit")
+      Arg::new("limit")
         .long("limit")
-        .takes_value(true)
+        .num_args(1)
         .help("Specifies the maximum number of results (1 - 50)"),
     )
     .group(
-      ArgGroup::with_name("listable")
-        .args(&["devices", "playlists", "liked"])
+      ArgGroup::new("listable")
+        .args(["devices", "playlists", "liked"])
         .required(true)
         .multiple(false),
     )
 }
 
-pub fn search_subcommand() -> App<'static, 'static> {
-  SubCommand::with_name("search")
+pub fn search_subcommand() -> Command {
+  Command::new("search")
     .version(env!("CARGO_PKG_VERSION"))
     .author(env!("CARGO_PKG_AUTHORS"))
     .about("Searches for tracks, albums and more")
     .long_about(
       "This will search for something on spotify and displays you the items. The output \
 format can be changed with the `--format` flag and the limit can be changed with \
-the `--limit` flag (between 1 and 50). The type can't be inferred, so you have to \
+the `--limit` flag (between 1 and 10). The type can't be inferred, so you have to \
 specify it.",
     )
     .visible_alias("s")
-    .arg(format_arg().default_value_ifs(&[
-      ("tracks", None, "%t - %a (%u)"),
-      ("playlists", None, "%p (%u)"),
-      ("artists", None, "%a (%u)"),
-      ("albums", None, "%b - %a (%u)"),
-      ("shows", None, "%h - %a (%u)"),
+    .arg(format_arg().default_value_ifs([
+      (
+        "tracks",
+        clap::builder::ArgPredicate::IsPresent,
+        "%t - %a (%u)",
+      ),
+      (
+        "playlists",
+        clap::builder::ArgPredicate::IsPresent,
+        "%p (%u)",
+      ),
+      ("artists", clap::builder::ArgPredicate::IsPresent, "%a (%u)"),
+      (
+        "albums",
+        clap::builder::ArgPredicate::IsPresent,
+        "%b - %a (%u)",
+      ),
+      (
+        "shows",
+        clap::builder::ArgPredicate::IsPresent,
+        "%h - %a (%u)",
+      ),
     ]))
     .arg(
-      Arg::with_name("search")
+      Arg::new("search")
         .required(true)
-        .takes_value(true)
+        .num_args(1)
         .value_name("SEARCH")
         .help("Specifies the search query"),
     )
     .arg(
-      Arg::with_name("albums")
-        .short("b")
+      Arg::new("albums")
+        .action(ArgAction::SetTrue)
+        .short('b')
         .long("albums")
         .help("Looks for albums"),
     )
     .arg(
-      Arg::with_name("artists")
-        .short("a")
+      Arg::new("artists")
+        .action(ArgAction::SetTrue)
+        .short('a')
         .long("artists")
         .help("Looks for artists"),
     )
     .arg(
-      Arg::with_name("playlists")
-        .short("p")
+      Arg::new("playlists")
+        .action(ArgAction::SetTrue)
+        .short('p')
         .long("playlists")
         .help("Looks for playlists"),
     )
     .arg(
-      Arg::with_name("tracks")
-        .short("t")
+      Arg::new("tracks")
+        .action(ArgAction::SetTrue)
+        .short('t')
         .long("tracks")
         .help("Looks for tracks"),
     )
     .arg(
-      Arg::with_name("shows")
-        .short("w")
+      Arg::new("shows")
+        .action(ArgAction::SetTrue)
+        .short('w')
         .long("shows")
         .help("Looks for shows"),
     )
     .arg(
-      Arg::with_name("limit")
+      Arg::new("limit")
+        .value_parser(|value: &str| match value.parse::<u32>() {
+          Ok(1..=10) => Ok(value.to_string()),
+          _ => Err("Search limit must be between 1 and 10".to_string()),
+        })
         .long("limit")
-        .takes_value(true)
-        .help("Specifies the maximum number of results (1 - 50)"),
+        .num_args(1)
+        .help("Specifies the maximum number of results (1 - 10)"),
     )
     .group(
-      ArgGroup::with_name("searchable")
-        .args(&["playlists", "tracks", "albums", "artists", "shows"])
+      ArgGroup::new("searchable")
+        .args(["playlists", "tracks", "albums", "artists", "shows"])
         .required(true)
         .multiple(false),
     )
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn all_subcommands_are_valid_clap4_commands() {
+    for command in [
+      playback_subcommand(),
+      play_subcommand(),
+      list_subcommand(),
+      search_subcommand(),
+    ] {
+      command.debug_assert();
+    }
+  }
+
+  #[test]
+  fn playback_flags_counts_and_conflicts_keep_their_behavior() {
+    let m = playback_subcommand()
+      .try_get_matches_from(["playback", "--like", "--shuffle"])
+      .unwrap();
+    assert!(m.get_flag("like") && m.get_flag("shuffle"));
+    assert!(m.contains_id("flags"));
+    assert!(!m.contains_id("jumps"));
+    let m = playback_subcommand()
+      .try_get_matches_from(["playback", "-nnn"])
+      .unwrap();
+    assert_eq!(m.get_count("next"), 3);
+    assert!(m.contains_id("jumps"));
+    let m = playback_subcommand()
+      .try_get_matches_from(["playback"])
+      .unwrap();
+    assert!(!m.contains_id("jumps"));
+    assert!(!m.contains_id("flags"));
+    assert!(
+      playback_subcommand()
+        .try_get_matches_from(["playback", "--like", "--dislike"])
+        .is_err()
+    );
+  }
+
+  #[test]
+  fn formats_and_search_limits_follow_the_selected_type() {
+    for (flag, expected) in [
+      ("--devices", "%v% %d"),
+      ("--liked", "%t - %a (%u)"),
+      ("--playlists", "%p (%u)"),
+    ] {
+      let m = list_subcommand()
+        .try_get_matches_from(["list", flag])
+        .unwrap();
+      assert_eq!(m.get_one::<String>("format").unwrap(), expected);
+    }
+    let m = search_subcommand()
+      .try_get_matches_from(["search", "song", "--tracks", "--limit", "10"])
+      .unwrap();
+    assert_eq!(m.get_one::<String>("format").unwrap(), "%t - %a (%u)");
+    assert!(
+      search_subcommand()
+        .try_get_matches_from(["search", "song", "--tracks", "--limit", "11"])
+        .is_err()
+    );
+    assert!(
+      play_subcommand()
+        .try_get_matches_from(["play", "--name", "song"])
+        .is_err()
+    );
+    assert!(
+      play_subcommand()
+        .try_get_matches_from(["play", "--uri", "spotify:track:example"])
+        .is_ok()
+    );
+  }
 }

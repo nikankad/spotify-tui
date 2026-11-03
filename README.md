@@ -1,212 +1,116 @@
 # Spotify TUI
 
-![Continuous Integration](https://github.com/Rigellute/spotify-tui/workflows/Continuous%20Integration/badge.svg?branch=master&event=push)
-![](https://img.shields.io/badge/license-MIT-blueviolet.svg)
-![](https://tokei.rs/b1/github/Rigellute/spotify-tui?category=code)
-[![Crates.io](https://img.shields.io/crates/v/spotify-tui.svg)](https://crates.io/crates/spotify-tui)
-![](https://img.shields.io/github/v/release/Rigellute/spotify-tui?color=%23c694ff)
+A terminal interface and CLI for controlling Spotify. This fork updates the
+original Spotify TUI for Spotify's 2026 Web API.
 
-<!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-94-orange.svg?style=flat-square)](#contributors-)
-<!-- ALL-CONTRIBUTORS-BADGE:END -->
-
-[![Follow Alexander Keliris (Rigellute)](https://img.shields.io/twitter/follow/AlexKeliris?label=Follow%20Alexander%20Keliris%20%28Rigellute%29&style=social)](https://twitter.com/intent/follow?screen_name=AlexKeliris)
-
-A Spotify client for the terminal written in Rust.
-
-![Demo](https://user-images.githubusercontent.com/12150276/75177190-91d4ab00-572d-11ea-80bd-c5e28c7b17ad.gif)
-
-The terminal in the demo above is using the [Rigel theme](https://rigel.netlify.com/).
-
-- [Spotify TUI](#spotify-tui)
-  - [Installation](#installation)
-    - [Homebrew](#homebrew)
-    - [Snap](#snap)
-    - [AUR](#aur)
-    - [Nix](#nix)
-    - [Void Linux](#void-linux)
-    - [Fedora/CentOS](#fedora-centos)
-    - [Cargo](#cargo)
-      - [Note on Linux](#note-on-linux)
-    - [Windows](#windows-10)
-      - [Scoop installer](#scoop-installer)
-    - [Manual](#manual)
-  - [Connecting to Spotify’s API](#connecting-to-spotifys-api)
-  - [Usage](#usage)
-- [Configuration](#configuration)
-  - [Limitations](#limitations)
-  - [Using with spotifyd](#using-with-spotifyd)
-  - [Libraries used](#libraries-used)
-  - [Development](#development)
-    - [Windows Subsystem for Linux](#windows-subsystem-for-linux)
-  - [Contributors](#contributors)
-  - [Roadmap](#roadmap)
-    - [High-level requirements yet to be implemented](#high-level-requirements-yet-to-be-implemented)
+Spotify Premium, your own Spotify developer app, and an active playback device
+are required. This application controls playback; it does not stream audio.
 
 ## Installation
 
-The binary executable is `spt`.
-
-### Homebrew
-
-For both macOS and Linux
+Build this checkout to get the updated client. Existing packages named
+`spotify-tui` may still contain the original 2021 release.
 
 ```bash
-brew install spotify-tui
+cargo install --path . --locked
 ```
 
-To update, run
+The binary is `spt`. Rustup reads the pinned toolchain from `rust-toolchain.toml`.
+The HTTP client uses Rustls, so OpenSSL development packages are no longer needed.
 
-```bash
-brew upgrade spotify-tui
+## Connecting to Spotify
+
+1. Sign in to the [Spotify developer dashboard](https://developer.spotify.com/dashboard)
+   with a Premium account and create an app with Web API access.
+2. Add `http://127.0.0.1:8888/callback` as a redirect URI and save. If you use a
+   different port, register that exact URI instead. Spotify no longer accepts
+   `localhost` redirect URIs.
+3. Add any other accounts that will sign in to the app's allowed users.
+4. Run `spt`, enter the app's Client ID, and confirm port 8888.
+5. Open the printed authorization URL if the browser does not open automatically.
+   Approve access and return to the terminal. If the callback port is occupied,
+   paste the full redirect URL when prompted.
+6. Open Spotify on a playback device. Press `d` in the terminal to select it.
+
+Sign-in uses Authorization Code with PKCE. No client secret is requested or
+stored. Tokens refresh automatically, including for CLI commands.
+
+Existing users must register the new `127.0.0.1` redirect URI. The first run
+reauthorizes old token caches; existing Client IDs, device selections and ports
+are retained. An old `client_secret` key is removed when `client.yml` is loaded.
+
+Client settings are in `~/.config/spotify-tui/client.yml`:
+
+```yaml
+client_id: "your-32-character-client-id"
+device_id: null
+port: 8888
 ```
 
-### Snap
-
-For a system with Snap installed, run
-
-```bash
-snap install spt
-```
-
-The stable version will be installed for you automatically.
-
-If you want to install the nightly build, run
-
-```bash
-snap install spt --edge
-```
-
-### AUR
-
-For those on Arch Linux you can find the package on AUR [here](https://aur.archlinux.org/packages/spotify-tui/). If however you're using an AUR helper you can install directly from that, for example (in the case of [yay](https://github.com/Jguer/yay)), run
-
-```bash
-yay -S spotify-tui
-```
-
-### Nix
-
-Available as the package `spotify-tui`. To install run:
-
-```bash
-nix-env -iA nixpkgs.spotify-tui
-```
-
-Where `nixpkgs` is the channel name in your configuration. For a more up-to-date installation, use the unstable channel.
-It is also possible to add the package to `environment.systemPackages` (for NixOS), or `home.packages` when using [home-manager](https://github.com/rycee/home-manager).
-
-### Void Linux
-
-Available on the official repositories. To install, run
-
-```bash
-sudo xbps-install -Su spotify-tui
-```
-
-### Fedora/CentOS
-
-Available on the [Copr](https://copr.fedorainfracloud.org/coprs/atim/spotify-tui/) repositories. To install, run
-
-```bash
-sudo dnf copr enable atim/spotify-tui -y && sudo dnf install spotify-tui
-```
-
-### Cargo
-
-Use this option if your architecture is not supported by the pre-built binaries found on the [releases page](https://github.com/Rigellute/spotify-tui/releases).
-
-First, install [Rust](https://www.rust-lang.org/tools/install) (using the recommended `rustup` installation method) and then
-
-```bash
-cargo install spotify-tui
-```
-
-This method will build the binary from source.
-
-To update, run the same command again.
-
-#### Note on Linux
-
-For compilation on Linux the development packages for `libssl` are required.
-For basic installation instructions, see [install OpenSSL](https://docs.rs/openssl/0.10.25/openssl/#automatic).
-In order to locate dependencies, the compilation also requires `pkg-config` to be installed.
-
-If you are using the Windows Subsystem for Linux, you'll need to [install additional dependencies](#windows-subsystem-for-linux).
-
-### Windows 10
-
-#### Scoop installer
-
-First, make sure scoop installer is on your windows box, for instruction please visit [scoop.sh](https://scoop.sh)
-
-Then open powershell and run following two commands:
-
-```bash
-scoop bucket add scoop-bucket https://github.com/Rigellute/scoop-bucket
-scoop install spotify-tui
-```
-
-After that program is available as: `spt` or `spt.exe`
-
-### Manual
-
-1. Download the latest [binary](https://github.com/Rigellute/spotify-tui/releases) for your OS.
-1. `cd` to the file you just downloaded and unzip
-1. `cd` to `spotify-tui` and run with `./spt`
-
-## Connecting to Spotify’s API
-
-`spotify-tui` needs to connect to Spotify’s API in order to find music by
-name, play tracks etc.
-
-Instructions on how to set this up will be shown when you first run the app.
-
-But here they are again:
-
-1. Go to the [Spotify dashboard](https://developer.spotify.com/dashboard/applications)
-1. Click `Create an app`
-    - You now can see your `Client ID` and `Client Secret`
-1. Now click `Edit Settings`
-1. Add `http://localhost:8888/callback` to the Redirect URIs
-1. Scroll down and click `Save`
-1. You are now ready to authenticate with Spotify!
-1. Go back to the terminal
-1. Run `spt`
-1. Enter your `Client ID`
-1. Enter your `Client Secret`
-1. Press enter to confirm the default port (8888) or enter a custom port
-1. You will be redirected to an official Spotify webpage to ask you for permissions.
-1. After accepting the permissions, you'll be redirected to localhost. If all goes well, the redirect URL will be parsed automatically and now you're done. If the local webserver fails for some reason you'll be redirected to a blank webpage that might say something like "Connection Refused" since no server is running. Regardless, copy the URL and paste into the prompt in the terminal.
-
-And now you are ready to use the `spotify-tui` 🎉
-
-You can edit the config at anytime at `${HOME}/.config/spotify-tui/client.yml`. (for snap `${HOME}/snap/spt/current/.config/spotify-tui/client.yml`)
+Tokens are cached separately in
+`~/.config/spotify-tui/.spotify_token_cache.json`. Delete that file to sign in
+again. Client settings and tokens are written atomically with owner-only
+permissions on Unix. Credential reads reject symlinks and oversized files.
+See the [security and memory review](docs/security-memory-review.md) for
+transport protections, cache limits and validation results.
 
 ## Usage
 
-The binary is named `spt`.
+Run `spt` for the terminal UI and press `?` for the current keybindings.
+Use `spt --help` or a subcommand's `--help` for the CLI.
 
-Running `spt` with no arguments will bring up the UI. Press `?` to bring up a help menu that shows currently implemented key events and their actions.
-There is also a CLI that is able to do most of the stuff the UI does. Use `spt --help` to learn more.
-
-Here are some example to get you excited.
-```
-spt --completions zsh # Prints shell completions for zsh to stdout (bash, power-shell and more are supported)
-
-spt play --name "Your Playlist" --playlist --random # Plays a random song from "Your Playlist"
-spt play --name "A cool song" --track # Plays 'A cool song'
-
-spt playback --like --shuffle # Likes the current song and toggles shuffle mode
-spt playback --toggle # Plays/pauses the current playback
-
-spt list --liked --limit 50 # See your liked songs (50 is the max limit)
-
-# Looks for 'An even cooler song' and gives you the '{name} from {album}' of up to 30 matches
-spt search "An even cooler song" --tracks --format "%t from %b" --limit 30
+```bash
+spt --completions zsh
+spt play --name "Your Playlist" --playlist --random
+spt play --name "A song" --track
+spt playback --like --shuffle
+spt playback --toggle
+spt list --liked --limit 50
+spt search "A song" --tracks --format "%t from %b" --limit 10
 ```
 
-# Configuration
+Search is capped at 10 results per type. Library pages support up to 50 items.
+Search requests all supported types in one call to reduce quota usage.
+
+## Queue, saved episodes and audiobooks
+
+Select **Queue**, **Saved Episodes**, or **Audiobooks** from the Library.
+Queue shows what is playing and the upcoming tracks and episodes. Press `F5`
+to refresh; `Enter` starts the selected item. The public API supports adding
+items to the queue, but does not provide queue removal or reordering.
+
+In Saved Episodes, `Enter` resumes from the saved listening position. Finished
+episodes start from the beginning. Press `s` to save/remove a selected track,
+episode or audiobook in the new views; `z` queues a track or episode. On an
+existing podcast's episode page, `w` saves/removes the episode separately from
+following the show. Playback `--like` and `--dislike` also work for episodes.
+
+In Audiobooks, `Enter` opens the chapter list. Press `O` to open a book in
+Spotify, or `Enter` on a chapter to open that chapter. Audiobook playback uses
+the official Spotify app; the Web API's playback endpoints do not document
+chapter playback. Availability depends on your region and account access.
+Use the configured next/previous page keys to browse paged results.
+
+To search the audiobook catalogue in the TUI, type `audiobook Dune` into the
+search input. You can also paste a Spotify audiobook URL or URI to open its
+chapters directly.
+
+```bash
+spt queue --json
+spt episodes --limit 20 --offset 20
+spt episodes --save spotify:episode:EPISODE_ID
+spt episodes --resume EPISODE_ID
+spt audiobooks --search "Dune" --limit 10
+spt audiobooks --chapters AUDIOBOOK_ID
+spt audiobooks --save AUDIOBOOK_ID
+spt audiobooks --open AUDIOBOOK_ID
+```
+
+Read commands support `--json`; paged reads accept `--limit` and `--offset`.
+See [feature coverage](docs/feature-coverage.md) for the current API additions
+and Spotify app features that cannot be implemented through this connection.
+
+## Configuration
 
 A configuration file is located at `${HOME}/.config/spotify-tui/config.yml`, for snap `${HOME}/snap/spt/current/.config/spotify-tui/config.yml`
 (not to be confused with client.yml which handles spotify authentication)
@@ -236,7 +140,7 @@ theme:
 behavior:
   seek_milliseconds: 5000
   volume_increment: 10
-  # The lower the number the higher the "frames per second". You can decrease this number so that the audio visualisation is smoother but this can be expensive!
+  # The lower the number the higher the "frames per second". Lower values use more CPU.
   tick_rate_milliseconds: 250
   # Enable text emphasis (typically italic/bold text styling). Disabling this might be important if the terminal config is otherwise restricted and rendering text escapes interferes with the UI.
   enable_text_emphasis: true
@@ -283,48 +187,89 @@ keybindings:
   shuffle: "ctrl-s"
   repeat: "r"
   search: "/"
-  audio_analysis: "v"
   jump_to_context: "o"
   basic_view: "B"
   add_item_to_queue: "z"
 ```
 
-## Limitations
+## Spotify API limits
 
-This app uses the [Web API](https://developer.spotify.com/documentation/web-api/) from Spotify, which doesn't handle streaming itself. So you'll need either an official Spotify client open or a lighter weight alternative such as [spotifyd](https://github.com/Spotifyd/spotifyd).
+Playlists, liked songs, saved albums, followed artists, podcasts, recently
+played tracks, catalogue search, artist releases and playback controls remain
+available subject to the app's Spotify permissions.
 
-If you want to play tracks, Spotify requires that you have a Premium account.
+Removed features are audio analysis, song/artist recommendations, related
+artists, artist top tracks, and the Made for You playlist-name search. Their
+endpoints are unavailable to new development apps. Artist pages now show
+releases. Old configuration keys for removed features are ignored.
 
-## Using with [spotifyd](https://github.com/Spotifyd/spotifyd)
+Development apps cannot read every playlist, including Spotify-owned mixes and
+some playlists owned by other users. Failed requests show an error instead of
+leaving the previous playlist on screen. Unlike Spotifast, this client has no
+librespot session to provide additional playlist or discovery data.
 
-Follow the spotifyd documentation to get set up.
+Spotify's Development Mode has account and quota restrictions. A `429` response
+pauses requests for `Retry-After`; exhausted development quota is reported
+separately and pauses requests for at least an hour. Apps registered by the
+same developer share their quota. No failed writes are replayed automatically.
 
-After that there is not much to it.
+See [2026 compatibility notes](docs/2026-compatibility.md) for migration details
+and sources. The supplied [Spotifast capability reference](docs/_reference/what-spotify-allows.md)
+describes Spotifast's additional playback and private-session integrations;
+it is not a feature list for Spotify TUI.
 
-1. Start running the spotifyd daemon.
-1. Start up `spt`
-1. Press `d` to go to the device selection menu and the spotifyd "device" should be there - if not check [these docs](https://github.com/Spotifyd/spotifyd#logging)
+## Playback devices
 
-## Libraries used
-
-- [tui-rs](https://github.com/fdehau/tui-rs)
-- [rspotify](https://github.com/ramsayleung/rspotify)
+Keep an official Spotify client or a configured
+[spotifyd](https://github.com/Spotifyd/spotifyd) instance running. Press `d` to
+select an available device. With no explicit selection, playback requests use
+Spotify's active device. Devices marked restricted by Spotify cannot be
+controlled through the Web API.
 
 ## Development
 
-1. [Install OpenSSL](https://docs.rs/openssl/0.10.25/openssl/#automatic)
-1. [Install Rust](https://www.rust-lang.org/tools/install)
-1. [Install `xorg-dev`](https://github.com/aweinstock314/rust-clipboard#prerequisites) (required for clipboard support)
-1. Clone or fork this repo and `cd` to it
-1. And then `cargo run`
-
-### Windows Subsystem for Linux
-
-You might get a linking error. If so, you'll probably need to install additional dependencies required by the clipboard package
+Start a populated, offline session without a Spotify account:
 
 ```bash
-sudo apt-get install -y -qq pkg-config libssl-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+cargo run --locked -- --dev
 ```
+
+`spt --dev` (alias `--demo`) starts in Liked Songs with sample playlists,
+albums, artists, podcasts, saved episodes, audiobooks, a mixed queue and three
+devices. Search, pagination, playback controls, saving/removing items, queuing
+and device selection run against an in-memory backend. The search box displays
+`DEV - offline`. Playback advances a simulated clock and produces no audio.
+All changes reset when the process exits.
+
+Development mode skips OAuth and the saved client, token and user configuration
+files. It never connects to Spotify or saves settings. Pass `--config PATH`
+explicitly to preview a theme or keybindings. Sample audiobook/chapter links
+do not open a browser.
+
+The same flag works with CLI commands, before or after the subcommand:
+
+```bash
+cargo run --locked -- --dev queue --json
+cargo run --locked -- episodes --dev --json --offset 20
+cargo run --locked -- --dev audiobooks --search observatory
+cargo run --locked -- --dev playback --volume 70
+```
+
+Inspired by [Spotifast's demo mode](https://github.com/crmne/spotifast/blob/main/src/demo.rs).
+The generated catalogue lives in `src/spotify/demo.rs`; it uses the normal
+response models, UI handlers and CLI paths, without extra dependencies or
+downloaded assets.
+
+```bash
+cargo check --locked --all-targets
+cargo test --locked
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+```
+
+The client uses Ratatui, Crossterm, Tokio 1, Clap 4 and Reqwest with Rustls.
+Tests use local HTTP fixtures and do not require Spotify credentials. A live
+account and playback device are needed to verify end-to-end playback.
 
 ## Contributors
 
@@ -464,84 +409,3 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
-
-## Roadmap
-
-The goal is to eventually implement almost every Spotify feature.
-
-### High-level requirements yet to be implemented
-
-- Add songs to a playlist
-- Be able to scroll through result pages in every view
-
-This table shows all that is possible with the Spotify API, what is implemented already, and whether that is essential.
-
-| API method                                        | Implemented yet? | Explanation                                                                                                                                                  | Essential? |
-| ------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
-| track                                             | No               | returns a single track given the track's ID, URI or URL                                                                                                      | No         |
-| tracks                                            | No               | returns a list of tracks given a list of track IDs, URIs, or URLs                                                                                            | No         |
-| artist                                            | No               | returns a single artist given the artist's ID, URI or URL                                                                                                    | Yes        |
-| artists                                           | No               | returns a list of artists given the artist IDs, URIs, or URLs                                                                                                | No         |
-| artist_albums                                     | Yes              | Get Spotify catalog information about an artist's albums                                                                                                     | Yes        |
-| artist_top_tracks                                 | Yes              | Get Spotify catalog information about an artist's top 10 tracks by country.                                                                                  | Yes        |
-| artist_related_artists                            | Yes              | Get Spotify catalog information about artists similar to an identified artist. Similarity is based on analysis of the Spotify community's listening history. | Yes        |
-| album                                             | Yes              | returns a single album given the album's ID, URIs or URL                                                                                                     | Yes        |
-| albums                                            | No               | returns a list of albums given the album IDs, URIs, or URLs                                                                                                  | No         |
-| search_album                                      | Yes              | Search album based on query                                                                                                                                  | Yes        |
-| search_artist                                     | Yes              | Search artist based on query                                                                                                                                 | Yes        |
-| search_track                                      | Yes              | Search track based on query                                                                                                                                  | Yes        |
-| search_playlist                                   | Yes              | Search playlist based on query                                                                                                                               | Yes        |
-| album_track                                       | Yes              | Get Spotify catalog information about an album's tracks                                                                                                      | Yes        |
-| user                                              | No               | Gets basic profile information about a Spotify User                                                                                                          | No         |
-| playlist                                          | Yes              | Get full details about Spotify playlist                                                                                                                      | Yes        |
-| current_user_playlists                            | Yes              | Get current user playlists without required getting his profile                                                                                              | Yes        |
-| user_playlists                                    | No               | Gets playlists of a user                                                                                                                                     | No         |
-| user_playlist                                     | No               | Gets playlist of a user                                                                                                                                      | No         |
-| user_playlist_tracks                              | Yes              | Get full details of the tracks of a playlist owned by a user                                                                                                 | Yes        |
-| user_playlist_create                              | No               | Creates a playlist for a user                                                                                                                                | Yes        |
-| user_playlist_change_detail                       | No               | Changes a playlist's name and/or public/private state                                                                                                        | Yes        |
-| user_playlist_unfollow                            | Yes              | Unfollows (deletes) a playlist for a user                                                                                                                    | Yes        |
-| user_playlist_add_track                           | No               | Adds tracks to a playlist                                                                                                                                    | Yes        |
-| user_playlist_replace_track                       | No               | Replace all tracks in a playlist                                                                                                                             | No         |
-| user_playlist_recorder_tracks                     | No               | Reorder tracks in a playlist                                                                                                                                 | No         |
-| user_playlist_remove_all_occurrences_of_track     | No               | Removes all occurrences of the given tracks from the given playlist                                                                                          | No         |
-| user_playlist_remove_specific_occurrenes_of_track | No               | Removes all occurrences of the given tracks from the given playlist                                                                                          | No         |
-| user_playlist_follow_playlist                     | Yes              | Add the current authenticated user as a follower of a playlist.                                                                                              | Yes        |
-| user_playlist_check_follow                        | No               | Check to see if the given users are following the given playlist                                                                                             | Yes        |
-| me                                                | No               | Get detailed profile information about the current user.                                                                                                     | Yes        |
-| current_user                                      | No               | Alias for `me`                                                                                                                                               | Yes        |
-| current_user_playing_track                        | Yes              | Get information about the current users currently playing track.                                                                                             | Yes        |
-| current_user_saved_albums                         | Yes              | Gets a list of the albums saved in the current authorized user's "Your Music" library                                                                        | Yes        |
-| current_user_saved_tracks                         | Yes              | Gets the user's saved tracks or "Liked Songs"                                                                                                                | Yes        |
-| current_user_followed_artists                     | Yes              | Gets a list of the artists followed by the current authorized user                                                                                           | Yes        |
-| current_user_saved_tracks_delete                  | Yes              | Remove one or more tracks from the current user's "Your Music" library.                                                                                      | Yes        |
-| current_user_saved_tracks_contain                 | No               | Check if one or more tracks is already saved in the current Spotify user’s “Your Music” library.                                                             | Yes        |
-| current_user_saved_tracks_add                     | Yes              | Save one or more tracks to the current user's "Your Music" library.                                                                                          | Yes        |
-| current_user_top_artists                          | No               | Get the current user's top artists                                                                                                                           | Yes        |
-| current_user_top_tracks                           | No               | Get the current user's top tracks                                                                                                                            | Yes        |
-| current_user_recently_played                      | Yes              | Get the current user's recently played tracks                                                                                                                | Yes        |
-| current_user_saved_albums_add                     | Yes              | Add one or more albums to the current user's "Your Music" library.                                                                                           | Yes        |
-| current_user_saved_albums_delete                  | Yes              | Remove one or more albums from the current user's "Your Music" library.                                                                                      | Yes        |
-| user_follow_artists                               | Yes              | Follow one or more artists                                                                                                                                   | Yes        |
-| user_unfollow_artists                             | Yes              | Unfollow one or more artists                                                                                                                                 | Yes        |
-| user_follow_users                                 | No               | Follow one or more users                                                                                                                                     | No         |
-| user_unfollow_users                               | No               | Unfollow one or more users                                                                                                                                   | No         |
-| featured_playlists                                | No               | Get a list of Spotify featured playlists                                                                                                                     | Yes        |
-| new_releases                                      | No               | Get a list of new album releases featured in Spotify                                                                                                         | Yes        |
-| categories                                        | No               | Get a list of categories used to tag items in Spotify                                                                                                        | Yes        |
-| recommendations                                   | Yes              | Get Recommendations Based on Seeds                                                                                                                           | Yes        |
-| audio_features                                    | No               | Get audio features for a track                                                                                                                               | No         |
-| audios_features                                   | No               | Get Audio Features for Several Tracks                                                                                                                        | No         |
-| audio_analysis                                    | Yes              | Get Audio Analysis for a Track                                                                                                                               | Yes        |
-| device                                            | Yes              | Get a User’s Available Devices                                                                                                                               | Yes        |
-| current_playback                                  | Yes              | Get Information About The User’s Current Playback                                                                                                            | Yes        |
-| current_playing                                   | No               | Get the User’s Currently Playing Track                                                                                                                       | No         |
-| transfer_playback                                 | Yes              | Transfer a User’s Playback                                                                                                                                   | Yes        |
-| start_playback                                    | Yes              | Start/Resume a User’s Playback                                                                                                                               | Yes        |
-| pause_playback                                    | Yes              | Pause a User’s Playback                                                                                                                                      | Yes        |
-| next_track                                        | Yes              | Skip User’s Playback To Next Track                                                                                                                           | Yes        |
-| previous_track                                    | Yes              | Skip User’s Playback To Previous Track                                                                                                                       | Yes        |
-| seek_track                                        | Yes              | Seek To Position In Currently Playing Track                                                                                                                  | Yes        |
-| repeat                                            | Yes              | Set Repeat Mode On User’s Playback                                                                                                                           | Yes        |
-| volume                                            | Yes              | Set Volume For User’s Playback                                                                                                                               | Yes        |
-| shuffle                                           | Yes              | Toggle Shuffle For User’s Playback                                                                                                                           | Yes        |

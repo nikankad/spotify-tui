@@ -4,14 +4,13 @@ use crate::event::Key;
 pub fn handler(key: Key, app: &mut App) {
   match key {
     Key::Enter => {
-      if let Some(route) = app.pop_navigation_stack() {
-        if app.confirm {
-          if let ActiveBlock::Dialog(d) = route.active_block {
-            match d {
-              DialogContext::PlaylistWindow => handle_playlist_dialog(app),
-              DialogContext::PlaylistSearch => handle_playlist_search_dialog(app),
-            }
-          }
+      if let Some(route) = app.pop_navigation_stack()
+        && app.confirm
+        && let ActiveBlock::Dialog(d) = route.active_block
+      {
+        match d {
+          DialogContext::PlaylistWindow => handle_playlist_dialog(app),
+          DialogContext::PlaylistSearch => handle_playlist_search_dialog(app),
         }
       }
     }

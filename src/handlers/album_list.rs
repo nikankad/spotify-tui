@@ -40,16 +40,16 @@ pub fn handler(key: Key, app: &mut App) {
       }
     }
     Key::Enter => {
-      if let Some(albums) = app.library.saved_albums.get_results(None) {
-        if let Some(selected_album) = albums.items.get(app.album_list_index) {
-          app.selected_album_full = Some(SelectedFullAlbum {
-            album: selected_album.album.clone(),
-            selected_index: 0,
-          });
-          app.album_table_context = AlbumTableContext::Full;
-          app.push_navigation_stack(RouteId::AlbumTracks, ActiveBlock::AlbumTracks);
-        };
-      }
+      if let Some(albums) = app.library.saved_albums.get_results(None)
+        && let Some(selected_album) = albums.items.get(app.album_list_index)
+      {
+        app.selected_album_full = Some(SelectedFullAlbum {
+          album: selected_album.album.clone(),
+          selected_index: 0,
+        });
+        app.album_table_context = AlbumTableContext::Full;
+        app.push_navigation_stack(RouteId::AlbumTracks, ActiveBlock::AlbumTracks);
+      };
     }
     k if k == app.user_config.keys.next_page => app.get_current_user_saved_albums_next(),
     k if k == app.user_config.keys.previous_page => app.get_current_user_saved_albums_previous(),

@@ -3,9 +3,8 @@ use crate::user_config::UserConfig;
 
 use super::util::{Flag, Format, FormatType, JumpDirection, Type};
 
-use anyhow::{anyhow, Result};
-use rand::{thread_rng, Rng};
-use rspotify::model::{context::CurrentlyPlaybackContext, PlayingItem};
+use crate::spotify::model::*;
+use anyhow::{Result, anyhow};
 
 pub struct CliApp<'a> {
   pub net: Network<'a>,
@@ -25,9 +24,9 @@ impl<'a> CliApp<'a> {
     // Update the liked_song_ids_set
     self
       .net
-      .handle_network_event(IoEvent::CurrentUserSavedTracksContains(
-        vec![id.to_string()],
-      ))
+      .handle_network_event(IoEvent::CurrentUserSavedTracksContains(vec![
+        id.to_string(),
+      ]))
       .await;
     self.net.app.lock().await.liked_song_ids_set.contains(id)
   }
@@ -46,11 +45,11 @@ impl<'a> CliApp<'a> {
   // spt playback -t
   pub async fn toggle_playback(&mut self) {
     let context = self.net.app.lock().await.current_playback_context.clone();
-    if let Some(c) = context {
-      if c.is_playing {
-        self.net.handle_network_event(IoEvent::PausePlayback).await;
-        return;
-      }
+    if let Some(c) = context
+      && c.is_playing
+    {
+      self.net.handle_network_event(IoEvent::PausePlayback).await;
+      return;
     }
     self
       .net
@@ -110,26 +109,20 @@ impl<'a> CliApp<'a> {
 
   // spt ... -d ... (specify device to control)
   pub async fn set_device(&mut self, name: String) -> Result<()> {
-    // Change the device if specified by user
-    let mut app = self.net.app.lock().await;
-    let mut device_index = 0;
-    if let Some(dp) = &app.devices {
-      for (i, d) in dp.devices.iter().enumerate() {
-        if d.name == name {
-          device_index = i;
-          // Save the id of the device
-          self
-            .net
-            .client_config
-            .set_device_id(d.id.clone())
-            .map_err(|_e| anyhow!("failed to use device with name '{}'", d.name))?;
-        }
-      }
-    } else {
-      // Error out if no device is available
-      return Err(anyhow!("no device available"));
-    }
-    app.selected_device_index = Some(device_index);
+    let selected = {
+      let app = self.net.app.lock().await;
+      app.devices.as_ref().and_then(|devices| {
+        devices
+          .devices
+          .iter()
+          .enumerate()
+          .find(|(_, device)| device.name == name)
+          .map(|(index, device)| (index, device.id.clone()))
+      })
+    };
+    let (index, id) = selected.ok_or_else(|| anyhow!("no device with name '{}'", name))?;
+    self.net.set_device_id(id)?;
+    self.net.app.lock().await.selected_device_index = Some(index);
     Ok(())
   }
 
@@ -152,6 +145,19 @@ impl<'a> CliApp<'a> {
   }
 
   pub async fn volume(&mut self, vol: String) -> Result<()> {
+    if self
+      .net
+      .app
+      .lock()
+      .await
+      .current_playback_context
+      .as_ref()
+      .is_some_and(|context| context.device.supports_volume == Some(false))
+    {
+      return Err(anyhow!(
+        "This device does not support Web API volume control"
+      ));
+    }
     let num = vol
       .parse::<u32>()
       .map_err(|_e| anyhow!("volume must be between 0 and 100"))?;
@@ -275,7 +281,7 @@ impl<'a> CliApp<'a> {
 
   pub async fn seek(&mut self, seconds_str: String) -> Result<()> {
     let seconds = match seconds_str.parse::<i32>() {
-      Ok(s) => s.abs() as u32,
+      Ok(s) => s.unsigned_abs(),
       Err(_) => return Err(anyhow!("failed to convert seconds to i32")),
     };
 
@@ -296,29 +302,27 @@ impl<'a> CliApp<'a> {
           PlayingItem::Episode(episode) => episode.duration_ms,
         };
 
-        (*ms as u32, duration)
+        ((*ms), duration)
       } else {
         return Err(anyhow!("no context available"));
       }
     };
 
     // Convert secs to ms
-    let ms = seconds * 1000;
+    let ms = seconds
+      .checked_mul(1000)
+      .ok_or_else(|| anyhow!("Seek duration is too large"))?;
     // Calculate new positon
     let position_to_seek = if seconds_str.starts_with('+') {
-      current_pos + ms
+      current_pos.saturating_add(ms)
     } else if seconds_str.starts_with('-') {
       // Jump to the beginning if the position_to_seek would be
       // negative, must be checked before the calculation to avoid
       // an 'underflow'
-      if ms > current_pos {
-        0u32
-      } else {
-        current_pos - ms
-      }
+      current_pos.saturating_sub(ms)
     } else {
       // Absolute value of the track
-      seconds * 1000
+      ms
     };
 
     // Check if position_to_seek is greater than duration (next track)
@@ -351,7 +355,10 @@ impl<'a> CliApp<'a> {
         let id = match c.item {
           Some(i) => match i {
             PlayingItem::Track(t) => t.id.ok_or_else(|| anyhow!("item has no id")),
-            PlayingItem::Episode(_) => Err(anyhow!("saving episodes not yet implemented")),
+            PlayingItem::Episode(episode) => {
+              self.net.spotify.set_saved_item(&episode.uri, s).await?;
+              return Ok(());
+            }
           },
           None => Err(anyhow!("no item playing")),
         }?;
@@ -396,10 +403,6 @@ impl<'a> CliApp<'a> {
       .net
       .handle_network_event(IoEvent::GetCurrentPlayback)
       .await;
-    self
-      .net
-      .handle_network_event(IoEvent::GetCurrentSavedTracks(None))
-      .await;
 
     let context = self
       .net
@@ -427,6 +430,14 @@ impl<'a> CliApp<'a> {
         hs
       }
       PlayingItem::Episode(episode) => {
+        let saved = self
+          .net
+          .spotify
+          .saved_items(std::slice::from_ref(&episode.uri))
+          .await?
+          .first()
+          .copied()
+          .unwrap_or(false);
         let mut hs = Format::from_type(FormatType::Episode(Box::new(episode.clone())));
         if let Some(ms) = context.progress_ms {
           hs.push(Format::Position((ms, episode.duration_ms)))
@@ -434,7 +445,7 @@ impl<'a> CliApp<'a> {
         hs.push(Format::Flags((
           context.repeat_state,
           context.shuffle_state,
-          false,
+          saved,
         )));
         hs
       }
@@ -452,11 +463,17 @@ impl<'a> CliApp<'a> {
     let offset = if random {
       // Only works with playlists for now
       if uri.contains("spotify:playlist:") {
-        let id = uri.split(':').last().unwrap();
-        match self.net.spotify.playlist(id, None, None).await {
+        let id = uri.split(':').next_back().unwrap();
+        match self.net.spotify.playlist(id).await {
           Ok(p) => {
             let num = p.tracks.total;
-            Some(thread_rng().gen_range(0..num) as usize)
+            if num == 0 {
+              self.net.app.lock().await.handle_error(anyhow!(
+                "Playlist is empty or its contents are unavailable to this app"
+              ));
+              return;
+            }
+            Some(fastrand::u32(0..num) as usize)
           }
           Err(e) => {
             self
@@ -503,7 +520,7 @@ impl<'a> CliApp<'a> {
   pub async fn play(&mut self, name: String, item: Type, queue: bool, random: bool) -> Result<()> {
     self
       .net
-      .handle_network_event(IoEvent::GetSearchResults(name.clone(), None))
+      .handle_network_event(IoEvent::GetSearchResults(name.clone()))
       .await;
     // Get the uri of the first found
     // item + the offset or return an error message
@@ -566,7 +583,7 @@ impl<'a> CliApp<'a> {
   pub async fn query(&mut self, search: String, format: String, item: Type) -> String {
     self
       .net
-      .handle_network_event(IoEvent::GetSearchResults(search.clone(), None))
+      .handle_network_event(IoEvent::GetSearchResults(search.clone()))
       .await;
 
     let app = self.net.app.lock().await;

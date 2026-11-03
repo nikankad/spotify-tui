@@ -1,29 +1,26 @@
-pub mod audio_analysis;
 pub mod help;
 pub mod util;
 use super::{
   app::{
-    ActiveBlock, AlbumTableContext, App, ArtistBlock, EpisodeTableContext, RecommendationsContext,
-    RouteId, SearchResultBlock, LIBRARY_OPTIONS,
+    ActiveBlock, AlbumTableContext, App, EpisodeTableContext, LIBRARY_OPTIONS, RouteId,
+    SearchResultBlock,
   },
   banner::BANNER,
 };
+use crate::spotify::RepeatState;
+use crate::spotify::model::*;
 use help::get_help_docs;
-use rspotify::model::show::ResumePoint;
-use rspotify::model::PlayingItem;
-use rspotify::senum::RepeatState;
 use tui::{
-  backend::Backend,
+  Frame,
   layout::{Alignment, Constraint, Direction, Layout, Rect},
   style::{Modifier, Style},
-  text::{Span, Spans, Text},
+  text::{Line, Span, Text},
   widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Table, Wrap},
-  Frame,
 };
 use util::{
-  create_artist_string, display_track_progress, get_artist_highlight_state, get_color,
+  BASIC_VIEW_HEIGHT, SMALL_TERMINAL_WIDTH, create_artist_string, display_track_progress, get_color,
   get_percentage_width, get_search_results_highlight_state, get_track_progress_percentage,
-  millis_to_minutes, BASIC_VIEW_HEIGHT, SMALL_TERMINAL_WIDTH,
+  millis_to_minutes,
 };
 
 pub enum TableId {
@@ -33,21 +30,15 @@ pub enum TableId {
   Podcast,
   Song,
   RecentlyPlayed,
-  MadeForYou,
   PodcastEpisodes,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Default)]
 pub enum ColumnId {
+  #[default]
   None,
   Title,
   Liked,
-}
-
-impl Default for ColumnId {
-  fn default() -> Self {
-    ColumnId::None
-  }
 }
 
 pub struct TableHeader<'a> {
@@ -73,15 +64,12 @@ pub struct TableItem {
   format: Vec<String>,
 }
 
-pub fn draw_help_menu<B>(f: &mut Frame<B>, app: &App)
-where
-  B: Backend,
-{
+pub fn draw_help_menu(f: &mut Frame<'_>, app: &App) {
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints([Constraint::Percentage(100)].as_ref())
     .margin(2)
-    .split(f.size());
+    .split(f.area());
 
   // Create a one-column table to avoid flickering due to non-determinism when
   // resolving constraints on widths of table columns.
@@ -103,7 +91,7 @@ where
     .iter()
     .map(|item| Row::new(item.clone()).style(help_menu_style));
 
-  let help_menu = Table::new(rows)
+  let help_menu = Table::new(rows, [Constraint::Percentage(100)])
     .header(Row::new(header))
     .block(
       Block::default()
@@ -116,14 +104,11 @@ where
         .border_style(help_menu_style),
     )
     .style(help_menu_style)
-    .widths(&[Constraint::Percentage(100)]);
+    .widths([Constraint::Percentage(100)]);
   f.render_widget(help_menu, chunks[0]);
 }
 
-pub fn draw_input_and_help_box<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_input_and_help_box(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // Check for the width and change the contraints accordingly
   let chunks = Layout::default()
     .direction(Direction::Horizontal)
@@ -145,12 +130,16 @@ where
   );
 
   let input_string: String = app.input.iter().collect();
-  let lines = Text::from((&input_string).as_str());
+  let lines = Text::from(input_string.as_str());
   let input = Paragraph::new(lines).block(
     Block::default()
       .borders(Borders::ALL)
       .title(Span::styled(
-        "Search",
+        if app.development {
+          "Search [DEV - offline]"
+        } else {
+          "Search"
+        },
         get_color(highlight_state, app.user_config.theme),
       ))
       .border_style(get_color(highlight_state, app.user_config.theme)),
@@ -176,10 +165,7 @@ where
   f.render_widget(help, chunks[1]);
 }
 
-pub fn draw_main_layout<B>(f: &mut Frame<B>, app: &App)
-where
-  B: Backend,
-{
+pub fn draw_main_layout(f: &mut Frame<'_>, app: &App) {
   let margin = util::get_main_layout_margin(app);
   // Responsive layout: new one kicks in at width 150 or higher
   if app.size.width >= SMALL_TERMINAL_WIDTH && !app.user_config.behavior.enforce_wide_search_bar {
@@ -187,7 +173,7 @@ where
       .direction(Direction::Vertical)
       .constraints([Constraint::Min(1), Constraint::Length(6)].as_ref())
       .margin(margin)
-      .split(f.size());
+      .split(f.area());
 
     // Nested main block with potential routes
     draw_routes(f, app, parent_layout[0]);
@@ -206,7 +192,7 @@ where
         .as_ref(),
       )
       .margin(margin)
-      .split(f.size());
+      .split(f.area());
 
     // Search input and help
     draw_input_and_help_box(f, app, parent_layout[0]);
@@ -222,10 +208,7 @@ where
   draw_dialog(f, app);
 }
 
-pub fn draw_routes<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_routes(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let chunks = Layout::default()
     .direction(Direction::Horizontal)
     .constraints([Constraint::Percentage(20), Constraint::Percentage(80)].as_ref())
@@ -236,6 +219,7 @@ where
   let current_route = app.get_current_route();
 
   match current_route.id {
+    RouteId::Media(view) => crate::media::draw(f, app, chunks[1], view),
     RouteId::Search => {
       draw_search_results(f, app, chunks[1]);
     }
@@ -260,30 +244,23 @@ where
     RouteId::Home => {
       draw_home(f, app, chunks[1]);
     }
-    RouteId::MadeForYou => {
-      draw_made_for_you(f, app, chunks[1]);
-    }
+
     RouteId::Artists => {
       draw_artist_table(f, app, chunks[1]);
     }
     RouteId::Podcasts => {
       draw_podcast_table(f, app, chunks[1]);
     }
-    RouteId::Recommendations => {
-      draw_recommendations_table(f, app, chunks[1]);
-    }
+
     RouteId::Error => {} // This is handled as a "full screen" route in main.rs
     RouteId::SelectedDevice => {} // This is handled as a "full screen" route in main.rs
-    RouteId::Analysis => {} // This is handled as a "full screen" route in main.rs
+    // This is handled as a "full screen" route in main.rs
     RouteId::BasicView => {} // This is handled as a "full screen" route in main.rs
-    RouteId::Dialog => {} // This is handled in the draw_dialog function in mod.rs
+    RouteId::Dialog => {}    // This is handled in the draw_dialog function in mod.rs
   };
 }
 
-pub fn draw_library_block<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_library_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let current_route = app.get_current_route();
   let highlight_state = (
     current_route.active_block == ActiveBlock::Library,
@@ -300,10 +277,7 @@ where
   );
 }
 
-pub fn draw_playlist_block<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_playlist_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let playlist_items = match &app.playlists {
     Some(p) => p.items.iter().map(|item| item.name.to_owned()).collect(),
     None => vec![],
@@ -327,10 +301,7 @@ where
   );
 }
 
-pub fn draw_user_block<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_user_block(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   // Check for width to make a responsive layout
   if app.size.width >= SMALL_TERMINAL_WIDTH && !app.user_config.behavior.enforce_wide_search_bar {
     let chunks = Layout::default()
@@ -338,8 +309,8 @@ where
       .constraints(
         [
           Constraint::Length(3),
-          Constraint::Percentage(30),
-          Constraint::Percentage(70),
+          Constraint::Length((LIBRARY_OPTIONS.len() + 2) as u16),
+          Constraint::Min(3),
         ]
         .as_ref(),
       )
@@ -352,7 +323,13 @@ where
   } else {
     let chunks = Layout::default()
       .direction(Direction::Vertical)
-      .constraints([Constraint::Percentage(30), Constraint::Percentage(70)].as_ref())
+      .constraints(
+        [
+          Constraint::Length((LIBRARY_OPTIONS.len() + 2) as u16),
+          Constraint::Min(3),
+        ]
+        .as_ref(),
+      )
       .split(layout_chunk);
 
     // Search input and help
@@ -361,10 +338,7 @@ where
   }
 }
 
-pub fn draw_search_results<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_search_results(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints(
@@ -385,14 +359,14 @@ where
 
     let currently_playing_id = app
       .current_playback_context
-      .clone()
+      .as_ref()
       .and_then(|context| {
-        context.item.and_then(|item| match item {
-          PlayingItem::Track(track) => track.id,
-          PlayingItem::Episode(episode) => Some(episode.id),
+        context.item.as_ref().and_then(|item| match item {
+          PlayingItem::Track(track) => track.id.as_deref(),
+          PlayingItem::Episode(episode) => Some(episode.id.as_str()),
         })
       })
-      .unwrap_or_else(|| "".to_string());
+      .unwrap_or_default();
 
     let songs = match &app.search_results.tracks {
       Some(tracks) => tracks
@@ -400,11 +374,11 @@ where
         .iter()
         .map(|item| {
           let mut song_name = "".to_string();
-          let id = item.clone().id.unwrap_or_else(|| "".to_string());
+          let id = item.id.as_deref().unwrap_or_default();
           if currently_playing_id == id {
             song_name += "▶ "
           }
-          if app.liked_song_ids_set.contains(&id) {
+          if app.liked_song_ids_set.contains(id) {
             song_name += &app.user_config.padded_liked_icon();
           }
 
@@ -432,10 +406,10 @@ where
         .iter()
         .map(|item| {
           let mut artist = String::new();
-          if app.followed_artist_ids_set.contains(&item.id.to_owned()) {
+          if app.followed_artist_ids_set.contains(&item.id) {
             artist.push_str(&app.user_config.padded_liked_icon());
           }
-          artist.push_str(&item.name.to_owned());
+          artist.push_str(&item.name);
           artist
         })
         .collect(),
@@ -465,10 +439,10 @@ where
         .iter()
         .map(|item| {
           let mut album_artist = String::new();
-          if let Some(album_id) = &item.id {
-            if app.saved_album_ids_set.contains(&album_id.to_owned()) {
-              album_artist.push_str(&app.user_config.padded_liked_icon());
-            }
+          if let Some(album_id) = &item.id
+            && app.saved_album_ids_set.contains(album_id)
+          {
+            album_artist.push_str(&app.user_config.padded_liked_icon());
           }
           album_artist.push_str(&format!(
             "{} - {} ({})",
@@ -523,7 +497,7 @@ where
         .iter()
         .map(|item| {
           let mut show_name = String::new();
-          if app.saved_show_ids_set.contains(&item.id.to_owned()) {
+          if app.saved_show_ids_set.contains(&item.id) {
             show_name.push_str(&app.user_config.padded_liked_icon());
           }
           show_name.push_str(&format!("{:} - {}", item.name, item.publisher));
@@ -550,10 +524,7 @@ struct AlbumUi {
   title: String,
 }
 
-pub fn draw_artist_table<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_artist_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let header = TableHeader {
     id: TableId::Artist,
     items: vec![TableHeaderItem {
@@ -588,10 +559,7 @@ where
   )
 }
 
-pub fn draw_podcast_table<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_podcast_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let header = TableHeader {
     id: TableId::Podcast,
     items: vec![
@@ -640,10 +608,7 @@ where
   };
 }
 
-pub fn draw_album_table<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_album_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let header = TableHeader {
     id: TableId::Album,
     items: vec![
@@ -660,7 +625,7 @@ where
       TableHeaderItem {
         id: ColumnId::Title,
         text: "Title",
-        width: get_percentage_width(layout_chunk.width, 2.0 / 5.0) - 5,
+        width: get_percentage_width(layout_chunk.width, 2.0 / 5.0).saturating_sub(5),
       },
       TableHeaderItem {
         text: "Artist",
@@ -710,8 +675,10 @@ where
           selected_index: selected_album_simplified.selected_index,
         })
     }
-    AlbumTableContext::Full => match app.selected_album_full.clone() {
-      Some(selected_album) => Some(AlbumUi {
+    AlbumTableContext::Full => app
+      .selected_album_full
+      .as_ref()
+      .map(|selected_album| AlbumUi {
         items: selected_album
           .album
           .tracks
@@ -735,8 +702,6 @@ where
         ),
         selected_index: app.saved_album_tracks_index,
       }),
-      None => None,
-    },
   };
 
   if let Some(album_ui) = album_ui {
@@ -752,89 +717,7 @@ where
   };
 }
 
-pub fn draw_recommendations_table<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
-  let header = TableHeader {
-    id: TableId::Song,
-    items: vec![
-      TableHeaderItem {
-        id: ColumnId::Liked,
-        text: "",
-        width: 2,
-      },
-      TableHeaderItem {
-        id: ColumnId::Title,
-        text: "Title",
-        width: get_percentage_width(layout_chunk.width, 0.3),
-      },
-      TableHeaderItem {
-        text: "Artist",
-        width: get_percentage_width(layout_chunk.width, 0.3),
-        ..Default::default()
-      },
-      TableHeaderItem {
-        text: "Album",
-        width: get_percentage_width(layout_chunk.width, 0.3),
-        ..Default::default()
-      },
-      TableHeaderItem {
-        text: "Length",
-        width: get_percentage_width(layout_chunk.width, 0.1),
-        ..Default::default()
-      },
-    ],
-  };
-
-  let current_route = app.get_current_route();
-  let highlight_state = (
-    current_route.active_block == ActiveBlock::TrackTable,
-    current_route.hovered_block == ActiveBlock::TrackTable,
-  );
-
-  let items = app
-    .track_table
-    .tracks
-    .iter()
-    .map(|item| TableItem {
-      id: item.id.clone().unwrap_or_else(|| "".to_string()),
-      format: vec![
-        "".to_string(),
-        item.name.to_owned(),
-        create_artist_string(&item.artists),
-        item.album.name.to_owned(),
-        millis_to_minutes(u128::from(item.duration_ms)),
-      ],
-    })
-    .collect::<Vec<TableItem>>();
-  // match RecommendedContext
-  let recommendations_ui = match &app.recommendations_context {
-    Some(RecommendationsContext::Song) => format!(
-      "Recommendations based on Song \'{}\'",
-      &app.recommendations_seed
-    ),
-    Some(RecommendationsContext::Artist) => format!(
-      "Recommendations based on Artist \'{}\'",
-      &app.recommendations_seed
-    ),
-    None => "Recommendations".to_string(),
-  };
-  draw_table(
-    f,
-    app,
-    layout_chunk,
-    (&recommendations_ui[..], &header),
-    &items,
-    app.track_table.selected_index,
-    highlight_state,
-  )
-}
-
-pub fn draw_song_table<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_song_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let header = TableHeader {
     id: TableId::Song,
     items: vec![
@@ -899,10 +782,7 @@ where
   )
 }
 
-pub fn draw_basic_view<B>(f: &mut Frame<B>, app: &App)
-where
-  B: Backend,
-{
+pub fn draw_basic_view(f: &mut Frame<'_>, app: &App) {
   // If space is negative, do nothing because the widget would not fit
   if let Some(s) = app.size.height.checked_sub(BASIC_VIEW_HEIGHT) {
     let space = s / 2;
@@ -916,16 +796,13 @@ where
         ]
         .as_ref(),
       )
-      .split(f.size());
+      .split(f.area());
 
     draw_playbar(f, app, chunks[1]);
   }
 }
 
-pub fn draw_playbar<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_playbar(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints(
@@ -941,166 +818,165 @@ where
 
   // If no track is playing, render paragraph showing which device is selected, if no selected
   // give hint to choose a device
-  if let Some(current_playback_context) = &app.current_playback_context {
-    if let Some(track_item) = &current_playback_context.item {
-      let play_title = if current_playback_context.is_playing {
-        "Playing"
+  if let Some(current_playback_context) = &app.current_playback_context
+    && let Some(track_item) = &current_playback_context.item
+  {
+    let play_title = if current_playback_context.is_playing {
+      "Playing"
+    } else {
+      "Paused"
+    };
+
+    let shuffle_text = if current_playback_context.shuffle_state {
+      "On"
+    } else {
+      "Off"
+    };
+
+    let repeat_text = match current_playback_context.repeat_state {
+      RepeatState::Off => "Off",
+      RepeatState::Track => "Track",
+      RepeatState::Context => "All",
+    };
+
+    let title = format!(
+      "{:-7} ({} | Shuffle: {:-3} | Repeat: {:-5} | Volume: {:-2}%)",
+      play_title,
+      current_playback_context.device.name,
+      shuffle_text,
+      repeat_text,
+      if current_playback_context.device.supports_volume == Some(false) {
+        "n/a".to_string()
       } else {
-        "Paused"
-      };
+        current_playback_context.device.volume_percent.to_string()
+      }
+    );
 
-      let shuffle_text = if current_playback_context.shuffle_state {
-        "On"
-      } else {
-        "Off"
-      };
+    let current_route = app.get_current_route();
+    let highlight_state = (
+      current_route.active_block == ActiveBlock::PlayBar,
+      current_route.hovered_block == ActiveBlock::PlayBar,
+    );
 
-      let repeat_text = match current_playback_context.repeat_state {
-        RepeatState::Off => "Off",
-        RepeatState::Track => "Track",
-        RepeatState::Context => "All",
-      };
+    let title_block = Block::default()
+      .borders(Borders::ALL)
+      .title(Span::styled(
+        &title,
+        get_color(highlight_state, app.user_config.theme),
+      ))
+      .border_style(get_color(highlight_state, app.user_config.theme));
 
-      let title = format!(
-        "{:-7} ({} | Shuffle: {:-3} | Repeat: {:-5} | Volume: {:-2}%)",
-        play_title,
-        current_playback_context.device.name,
-        shuffle_text,
-        repeat_text,
-        current_playback_context.device.volume_percent
-      );
+    f.render_widget(title_block, layout_chunk);
 
-      let current_route = app.get_current_route();
-      let highlight_state = (
-        current_route.active_block == ActiveBlock::PlayBar,
-        current_route.hovered_block == ActiveBlock::PlayBar,
-      );
+    let (item_id, name, duration_ms) = match track_item {
+      PlayingItem::Track(track) => (
+        track.id.to_owned().unwrap_or_else(|| "".to_string()),
+        track.name.to_owned(),
+        track.duration_ms,
+      ),
+      PlayingItem::Episode(episode) => (
+        episode.id.to_owned(),
+        episode.name.to_owned(),
+        episode.duration_ms,
+      ),
+    };
 
-      let title_block = Block::default()
-        .borders(Borders::ALL)
-        .title(Span::styled(
-          &title,
-          get_color(highlight_state, app.user_config.theme),
-        ))
-        .border_style(get_color(highlight_state, app.user_config.theme));
+    let track_name = if app.liked_song_ids_set.contains(&item_id) {
+      format!("{}{}", &app.user_config.padded_liked_icon(), name)
+    } else {
+      name
+    };
 
-      f.render_widget(title_block, layout_chunk);
+    let play_bar_text = match track_item {
+      PlayingItem::Track(track) => create_artist_string(&track.artists),
+      PlayingItem::Episode(episode) => format!("{} - {}", episode.name, episode.show.name),
+    };
 
-      let (item_id, name, duration_ms) = match track_item {
-        PlayingItem::Track(track) => (
-          track.id.to_owned().unwrap_or_else(|| "".to_string()),
-          track.name.to_owned(),
-          track.duration_ms,
-        ),
-        PlayingItem::Episode(episode) => (
-          episode.id.to_owned(),
-          episode.name.to_owned(),
-          episode.duration_ms,
-        ),
-      };
+    let lines = Text::from(Span::styled(
+      play_bar_text,
+      Style::default().fg(app.user_config.theme.playbar_text),
+    ));
 
-      let track_name = if app.liked_song_ids_set.contains(&item_id) {
-        format!("{}{}", &app.user_config.padded_liked_icon(), name)
-      } else {
-        name
-      };
-
-      let play_bar_text = match track_item {
-        PlayingItem::Track(track) => create_artist_string(&track.artists),
-        PlayingItem::Episode(episode) => format!("{} - {}", episode.name, episode.show.name),
-      };
-
-      let lines = Text::from(Span::styled(
-        play_bar_text,
-        Style::default().fg(app.user_config.theme.playbar_text),
-      ));
-
-      let artist = Paragraph::new(lines)
-        .style(Style::default().fg(app.user_config.theme.playbar_text))
-        .block(
-          Block::default().title(Span::styled(
-            &track_name,
-            Style::default()
-              .fg(app.user_config.theme.selected)
-              .add_modifier(Modifier::BOLD),
-          )),
-        );
-      f.render_widget(artist, chunks[0]);
-
-      let progress_ms = match app.seek_ms {
-        Some(seek_ms) => seek_ms,
-        None => app.song_progress_ms,
-      };
-
-      let perc = get_track_progress_percentage(progress_ms, duration_ms);
-
-      let song_progress_label = display_track_progress(progress_ms, duration_ms);
-      let modifier = if app.user_config.behavior.enable_text_emphasis {
-        Modifier::ITALIC | Modifier::BOLD
-      } else {
-        Modifier::empty()
-      };
-      let song_progress = Gauge::default()
-        .gauge_style(
+    let artist = Paragraph::new(lines)
+      .style(Style::default().fg(app.user_config.theme.playbar_text))
+      .block(
+        Block::default().title(Span::styled(
+          &track_name,
           Style::default()
-            .fg(app.user_config.theme.playbar_progress)
-            .bg(app.user_config.theme.playbar_background)
-            .add_modifier(modifier),
-        )
-        .percent(perc)
-        .label(Span::styled(
-          &song_progress_label,
-          Style::default().fg(app.user_config.theme.playbar_progress_text),
-        ));
-      f.render_widget(song_progress, chunks[2]);
-    }
+            .fg(app.user_config.theme.selected)
+            .add_modifier(Modifier::BOLD),
+        )),
+      );
+    f.render_widget(artist, chunks[0]);
+
+    let progress_ms = match app.seek_ms {
+      Some(seek_ms) => seek_ms,
+      None => app.song_progress_ms,
+    };
+
+    let perc = get_track_progress_percentage(progress_ms, duration_ms);
+
+    let song_progress_label = display_track_progress(progress_ms, duration_ms);
+    let modifier = if app.user_config.behavior.enable_text_emphasis {
+      Modifier::ITALIC | Modifier::BOLD
+    } else {
+      Modifier::empty()
+    };
+    let song_progress = Gauge::default()
+      .gauge_style(
+        Style::default()
+          .fg(app.user_config.theme.playbar_progress)
+          .bg(app.user_config.theme.playbar_background)
+          .add_modifier(modifier),
+      )
+      .percent(perc)
+      .label(Span::styled(
+        &song_progress_label,
+        Style::default().fg(app.user_config.theme.playbar_progress_text),
+      ));
+    f.render_widget(song_progress, chunks[2]);
   }
 }
 
-pub fn draw_error_screen<B>(f: &mut Frame<B>, app: &App)
-where
-  B: Backend,
-{
+pub fn draw_error_screen(f: &mut Frame<'_>, app: &App) {
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints([Constraint::Percentage(100)].as_ref())
     .margin(5)
-    .split(f.size());
+    .split(f.area());
 
   let playing_text = vec![
-    Spans::from(vec![
+    Line::from(vec![
       Span::raw("Api response: "),
       Span::styled(
         &app.api_error,
         Style::default().fg(app.user_config.theme.error_text),
       ),
     ]),
-    Spans::from(Span::styled(
+    Line::from(Span::styled(
       "If you are trying to play a track, please check that",
       Style::default().fg(app.user_config.theme.text),
     )),
-    Spans::from(Span::styled(
+    Line::from(Span::styled(
       " 1. You have a Spotify Premium Account",
       Style::default().fg(app.user_config.theme.text),
     )),
-    Spans::from(Span::styled(
+    Line::from(Span::styled(
       " 2. Your playback device is active and selected - press `d` to go to device selection menu",
       Style::default().fg(app.user_config.theme.text),
     )),
-    Spans::from(Span::styled(
+    Line::from(Span::styled(
       " 3. If you're using spotifyd as a playback device, your device name must not contain spaces",
       Style::default().fg(app.user_config.theme.text),
     )),
-    Spans::from(Span::styled("Hint: a playback device must be either an official spotify client or a light weight alternative such as spotifyd",
-        Style::default().fg(app.user_config.theme.hint)
-        ),
-    ),
-    Spans::from(
-      Span::styled(
-          "\nPress <Esc> to return",
-          Style::default().fg(app.user_config.theme.inactive),
-      ),
-    )
+    Line::from(Span::styled(
+      "Hint: a playback device must be either an official spotify client or a light weight alternative such as spotifyd",
+      Style::default().fg(app.user_config.theme.hint),
+    )),
+    Line::from(Span::styled(
+      "\nPress <Esc> to return",
+      Style::default().fg(app.user_config.theme.inactive),
+    )),
   ];
 
   let playing_paragraph = Paragraph::new(playing_text)
@@ -1118,10 +994,7 @@ where
   f.render_widget(playing_paragraph, chunks[0]);
 }
 
-fn draw_home<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+fn draw_home(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints([Constraint::Length(7), Constraint::Length(93)].as_ref())
@@ -1143,27 +1016,11 @@ where
     .border_style(get_color(highlight_state, app.user_config.theme));
   f.render_widget(welcome, layout_chunk);
 
-  let changelog = include_str!("../../CHANGELOG.md").to_string();
-
-  // If debug mode show the "Unreleased" header. Otherwise it is a release so there should be no
-  // unreleased features
-  let clean_changelog = if cfg!(debug_assertions) {
-    changelog
-  } else {
-    changelog.replace("\n## [Unreleased]\n", "")
-  };
-
-  // Banner text with correct styling
-  let mut top_text = Text::from(BANNER);
-  top_text.patch_style(Style::default().fg(app.user_config.theme.banner));
-
-  let bottom_text_raw = format!(
-    "{}{}",
-    "\nPlease report any bugs or missing features to https://github.com/Rigellute/spotify-tui\n\n",
-    clean_changelog
+  let top_text = Text::from(BANNER).patch_style(Style::default().fg(app.user_config.theme.banner));
+  const HOME_TEXT: &str = concat!(
+    "\nPlease report bugs to https://github.com/nikankad/spotify-tui\n\n",
+    include_str!("../../CHANGELOG.md")
   );
-  let bottom_text = Text::from(bottom_text_raw.as_str());
-
   // Contains the banner
   let top_text = Paragraph::new(top_text)
     .style(Style::default().fg(app.user_config.theme.text))
@@ -1171,7 +1028,7 @@ where
   f.render_widget(top_text, chunks[0]);
 
   // CHANGELOG
-  let bottom_text = Paragraph::new(bottom_text)
+  let bottom_text = Paragraph::new(HOME_TEXT)
     .style(Style::default().fg(app.user_config.theme.text))
     .block(Block::default())
     .wrap(Wrap { trim: false })
@@ -1179,126 +1036,48 @@ where
   f.render_widget(bottom_text, chunks[1]);
 }
 
-fn draw_artist_albums<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
-  let chunks = Layout::default()
-    .direction(Direction::Horizontal)
-    .constraints(
-      [
-        Constraint::Percentage(33),
-        Constraint::Percentage(33),
-        Constraint::Percentage(33),
-      ]
-      .as_ref(),
-    )
-    .split(layout_chunk);
-
+fn draw_artist_albums(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   if let Some(artist) = &app.artist {
-    let top_tracks = artist
-      .top_tracks
-      .iter()
-      .map(|top_track| {
-        let mut name = String::new();
-        if let Some(context) = &app.current_playback_context {
-          let track_id = match &context.item {
-            Some(PlayingItem::Track(track)) => track.id.to_owned(),
-            Some(PlayingItem::Episode(episode)) => Some(episode.id.to_owned()),
-            _ => None,
-          };
-
-          if track_id == top_track.id {
-            name.push_str("▶ ");
-          }
-        };
-        name.push_str(&top_track.name);
-        name
-      })
-      .collect::<Vec<String>>();
-
-    draw_selectable_list(
-      f,
-      app,
-      chunks[0],
-      &format!("{} - Top Tracks", &artist.artist_name),
-      &top_tracks,
-      get_artist_highlight_state(app, ArtistBlock::TopTracks),
-      Some(artist.selected_top_track_index),
-    );
-
-    let albums = &artist
+    let albums = artist
       .albums
       .items
       .iter()
-      .map(|item| {
-        let mut album_artist = String::new();
-        if let Some(album_id) = &item.id {
-          if app.saved_album_ids_set.contains(&album_id.to_owned()) {
-            album_artist.push_str(&app.user_config.padded_liked_icon());
-          }
-        }
-        album_artist.push_str(&format!(
-          "{} - {} ({})",
-          item.name.to_owned(),
-          create_artist_string(&item.artists),
-          item.album_type.as_deref().unwrap_or("unknown")
-        ));
-        album_artist
+      .map(|album| {
+        format!(
+          "{} ({})",
+          album.name,
+          album.release_date.as_deref().unwrap_or("unknown date")
+        )
       })
-      .collect::<Vec<String>>();
-
+      .collect::<Vec<_>>();
     draw_selectable_list(
       f,
       app,
-      chunks[1],
-      "Albums",
-      albums,
-      get_artist_highlight_state(app, ArtistBlock::Albums),
+      layout_chunk,
+      &format!("{} - Releases", artist.artist_name),
+      &albums,
+      (
+        app.get_current_route().active_block == ActiveBlock::ArtistBlock,
+        app.get_current_route().hovered_block == ActiveBlock::ArtistBlock,
+      ),
       Some(artist.selected_album_index),
     );
-
-    let related_artists = artist
-      .related_artists
-      .iter()
-      .map(|item| {
-        let mut artist = String::new();
-        if app.followed_artist_ids_set.contains(&item.id.to_owned()) {
-          artist.push_str(&app.user_config.padded_liked_icon());
-        }
-        artist.push_str(&item.name.to_owned());
-        artist
-      })
-      .collect::<Vec<String>>();
-
-    draw_selectable_list(
-      f,
-      app,
-      chunks[2],
-      "Related artists",
-      &related_artists,
-      get_artist_highlight_state(app, ArtistBlock::RelatedArtists),
-      Some(artist.selected_related_artist_index),
-    );
-  };
+  }
 }
 
-pub fn draw_device_list<B>(f: &mut Frame<B>, app: &App)
-where
-  B: Backend,
-{
+pub fn draw_device_list(f: &mut Frame<'_>, app: &App) {
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints([Constraint::Percentage(20), Constraint::Percentage(80)].as_ref())
     .margin(5)
-    .split(f.size());
+    .split(f.area());
 
-  let device_instructions: Vec<Spans> = vec![
+  let device_instructions: Vec<Line> = vec![
         "To play tracks, please select a device. ",
         "Use `j/k` or up/down arrow keys to move up and down and <Enter> to select. ",
         "Your choice here will be cached so you can jump straight back in when you next open `spotify-tui`. ",
         "You can change the playback device at any time by pressing `d`.",
-    ].into_iter().map(|instruction| Spans::from(Span::raw(instruction))).collect();
+    ].into_iter().map(|instruction| Line::from(Span::raw(instruction))).collect();
 
   let instructions = Paragraph::new(device_instructions)
     .style(Style::default().fg(app.user_config.theme.text))
@@ -1351,10 +1130,7 @@ where
   f.render_stateful_widget(list, chunks[1], &mut state);
 }
 
-pub fn draw_album_list<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_album_list(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let header = TableHeader {
     id: TableId::AlbumList,
     items: vec![
@@ -1415,10 +1191,7 @@ where
   };
 }
 
-pub fn draw_show_episodes<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_show_episodes(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let header = TableHeader {
     id: TableId::PodcastEpisodes,
     items: vec![
@@ -1430,7 +1203,7 @@ where
       },
       TableHeaderItem {
         text: "Date",
-        width: get_percentage_width(layout_chunk.width, 0.5 / 5.0) - 2,
+        width: get_percentage_width(layout_chunk.width, 0.5 / 5.0).saturating_sub(2),
         ..Default::default()
       },
       TableHeaderItem {
@@ -1526,51 +1299,7 @@ where
   };
 }
 
-pub fn draw_made_for_you<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
-  let header = TableHeader {
-    id: TableId::MadeForYou,
-    items: vec![TableHeaderItem {
-      text: "Name",
-      width: get_percentage_width(layout_chunk.width, 2.0 / 5.0),
-      ..Default::default()
-    }],
-  };
-
-  if let Some(playlists) = &app.library.made_for_you_playlists.get_results(None) {
-    let items = playlists
-      .items
-      .iter()
-      .map(|playlist| TableItem {
-        id: playlist.id.to_owned(),
-        format: vec![playlist.name.to_owned()],
-      })
-      .collect::<Vec<TableItem>>();
-
-    let current_route = app.get_current_route();
-    let highlight_state = (
-      current_route.active_block == ActiveBlock::MadeForYou,
-      current_route.hovered_block == ActiveBlock::MadeForYou,
-    );
-
-    draw_table(
-      f,
-      app,
-      layout_chunk,
-      ("Made For You", &header),
-      &items,
-      app.made_for_you_index,
-      highlight_state,
-    );
-  }
-}
-
-pub fn draw_recently_played_table<B>(f: &mut Frame<B>, app: &App, layout_chunk: Rect)
-where
-  B: Backend,
-{
+pub fn draw_recently_played_table(f: &mut Frame<'_>, app: &App, layout_chunk: Rect) {
   let header = TableHeader {
     id: TableId::RecentlyPlayed,
     items: vec![
@@ -1583,7 +1312,7 @@ where
         id: ColumnId::Title,
         text: "Title",
         // We need to subtract the fixed value of the previous column
-        width: get_percentage_width(layout_chunk.width, 2.0 / 5.0) - 2,
+        width: get_percentage_width(layout_chunk.width, 2.0 / 5.0).saturating_sub(2),
       },
       TableHeaderItem {
         text: "Artist",
@@ -1634,8 +1363,8 @@ where
   };
 }
 
-fn draw_selectable_list<B, S>(
-  f: &mut Frame<B>,
+fn draw_selectable_list<S>(
+  f: &mut Frame<'_>,
   app: &App,
   layout_chunk: Rect,
   title: &str,
@@ -1643,7 +1372,6 @@ fn draw_selectable_list<B, S>(
   highlight_state: (bool, bool),
   selected_index: Option<usize>,
 ) where
-  B: Backend,
   S: std::convert::AsRef<str>,
 {
   let mut state = ListState::default();
@@ -1672,105 +1400,101 @@ fn draw_selectable_list<B, S>(
   f.render_stateful_widget(list, layout_chunk, &mut state);
 }
 
-fn draw_dialog<B>(f: &mut Frame<B>, app: &App)
-where
-  B: Backend,
-{
-  if let ActiveBlock::Dialog(_) = app.get_current_route().active_block {
-    if let Some(playlist) = app.dialog.as_ref() {
-      let bounds = f.size();
-      // maybe do this better
-      let width = std::cmp::min(bounds.width - 2, 45);
-      let height = 8;
-      let left = (bounds.width - width) / 2;
-      let top = bounds.height / 4;
+fn draw_dialog(f: &mut Frame<'_>, app: &App) {
+  if let ActiveBlock::Dialog(_) = app.get_current_route().active_block
+    && let Some(playlist) = app.dialog.as_ref()
+  {
+    let bounds = f.area();
+    // maybe do this better
+    let width = std::cmp::min(bounds.width.saturating_sub(2), 45);
+    let height = 8;
+    let left = (bounds.width - width) / 2;
+    let top = bounds.height / 4;
 
-      let rect = Rect::new(left, top, width, height);
+    let rect = Rect::new(left, top, width, height);
 
-      f.render_widget(Clear, rect);
+    f.render_widget(Clear, rect);
 
-      let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.user_config.theme.inactive));
+    let block = Block::default()
+      .borders(Borders::ALL)
+      .border_style(Style::default().fg(app.user_config.theme.inactive));
 
-      f.render_widget(block, rect);
+    f.render_widget(block, rect);
 
-      let vchunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([Constraint::Min(3), Constraint::Length(3)].as_ref())
-        .split(rect);
+    let vchunks = Layout::default()
+      .direction(Direction::Vertical)
+      .margin(2)
+      .constraints([Constraint::Min(3), Constraint::Length(3)].as_ref())
+      .split(rect);
 
-      // suggestion: possibly put this as part of
-      // app.dialog, but would have to introduce lifetime
-      let text = vec![
-        Spans::from(Span::raw("Are you sure you want to delete the playlist: ")),
-        Spans::from(Span::styled(
-          playlist.as_str(),
-          Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Spans::from(Span::raw("?")),
-      ];
+    // suggestion: possibly put this as part of
+    // app.dialog, but would have to introduce lifetime
+    let text = vec![
+      Line::from(Span::raw("Are you sure you want to delete the playlist: ")),
+      Line::from(Span::styled(
+        playlist.as_str(),
+        Style::default().add_modifier(Modifier::BOLD),
+      )),
+      Line::from(Span::raw("?")),
+    ];
 
-      let text = Paragraph::new(text)
-        .wrap(Wrap { trim: true })
-        .alignment(Alignment::Center);
+    let text = Paragraph::new(text)
+      .wrap(Wrap { trim: true })
+      .alignment(Alignment::Center);
 
-      f.render_widget(text, vchunks[0]);
+    f.render_widget(text, vchunks[0]);
 
-      let hchunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .horizontal_margin(3)
-        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)].as_ref())
-        .split(vchunks[1]);
+    let hchunks = Layout::default()
+      .direction(Direction::Horizontal)
+      .horizontal_margin(3)
+      .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)].as_ref())
+      .split(vchunks[1]);
 
-      let ok_text = Span::raw("Ok");
-      let ok = Paragraph::new(ok_text)
-        .style(Style::default().fg(if app.confirm {
-          app.user_config.theme.hovered
-        } else {
-          app.user_config.theme.inactive
-        }))
-        .alignment(Alignment::Center);
+    let ok_text = Span::raw("Ok");
+    let ok = Paragraph::new(ok_text)
+      .style(Style::default().fg(if app.confirm {
+        app.user_config.theme.hovered
+      } else {
+        app.user_config.theme.inactive
+      }))
+      .alignment(Alignment::Center);
 
-      f.render_widget(ok, hchunks[0]);
+    f.render_widget(ok, hchunks[0]);
 
-      let cancel_text = Span::raw("Cancel");
-      let cancel = Paragraph::new(cancel_text)
-        .style(Style::default().fg(if app.confirm {
-          app.user_config.theme.inactive
-        } else {
-          app.user_config.theme.hovered
-        }))
-        .alignment(Alignment::Center);
+    let cancel_text = Span::raw("Cancel");
+    let cancel = Paragraph::new(cancel_text)
+      .style(Style::default().fg(if app.confirm {
+        app.user_config.theme.inactive
+      } else {
+        app.user_config.theme.hovered
+      }))
+      .alignment(Alignment::Center);
 
-      f.render_widget(cancel, hchunks[1]);
-    }
+    f.render_widget(cancel, hchunks[1]);
   }
 }
 
-fn draw_table<B>(
-  f: &mut Frame<B>,
+fn draw_table(
+  f: &mut Frame<'_>,
   app: &App,
   layout_chunk: Rect,
   table_layout: (&str, &TableHeader), // (title, header colums)
   items: &[TableItem], // The nested vector must have the same length as the `header_columns`
   selected_index: usize,
   highlight_state: (bool, bool),
-) where
-  B: Backend,
-{
+) {
   let selected_style =
     get_color(highlight_state, app.user_config.theme).add_modifier(Modifier::BOLD);
 
-  let track_playing_index = app.current_playback_context.to_owned().and_then(|ctx| {
-    ctx.item.and_then(|item| match item {
-      PlayingItem::Track(track) => items
-        .iter()
-        .position(|item| track.id.to_owned().map(|id| id == item.id).unwrap_or(false)),
-      PlayingItem::Episode(episode) => items.iter().position(|item| episode.id == item.id),
-    })
-  });
+  let playing_id = app
+    .current_playback_context
+    .as_ref()
+    .and_then(|context| context.item.as_ref())
+    .and_then(|item| match item {
+      PlayingItem::Track(track) => track.id.as_deref(),
+      PlayingItem::Episode(episode) => Some(episode.id.as_str()),
+    });
+  let track_playing_index = playing_id.and_then(|id| items.iter().position(|item| item.id == id));
 
   let (title, header) = table_layout;
 
@@ -1791,38 +1515,34 @@ fn draw_table<B>(
     match header.id {
       TableId::Song | TableId::RecentlyPlayed | TableId::Album => {
         // First check if the song should be highlighted because it is currently playing
-        if let Some(title_idx) = header.get_index(ColumnId::Title) {
-          if let Some(track_playing_offset_index) =
+        if let Some(title_idx) = header.get_index(ColumnId::Title)
+          && let Some(track_playing_offset_index) =
             track_playing_index.and_then(|idx| idx.checked_sub(offset))
-          {
-            if i == track_playing_offset_index {
-              formatted_row[title_idx] = format!("▶ {}", &formatted_row[title_idx]);
-              style = Style::default()
-                .fg(app.user_config.theme.active)
-                .add_modifier(Modifier::BOLD);
-            }
-          }
+          && i == track_playing_offset_index
+        {
+          formatted_row[title_idx] = format!("▶ {}", &formatted_row[title_idx]);
+          style = Style::default()
+            .fg(app.user_config.theme.active)
+            .add_modifier(Modifier::BOLD);
         }
 
         // Show this the liked icon if the song is liked
-        if let Some(liked_idx) = header.get_index(ColumnId::Liked) {
-          if app.liked_song_ids_set.contains(item.id.as_str()) {
-            formatted_row[liked_idx] = app.user_config.padded_liked_icon();
-          }
+        if let Some(liked_idx) = header.get_index(ColumnId::Liked)
+          && app.liked_song_ids_set.contains(item.id.as_str())
+        {
+          formatted_row[liked_idx] = app.user_config.padded_liked_icon();
         }
       }
       TableId::PodcastEpisodes => {
-        if let Some(name_idx) = header.get_index(ColumnId::Title) {
-          if let Some(track_playing_offset_index) =
+        if let Some(name_idx) = header.get_index(ColumnId::Title)
+          && let Some(track_playing_offset_index) =
             track_playing_index.and_then(|idx| idx.checked_sub(offset))
-          {
-            if i == track_playing_offset_index {
-              formatted_row[name_idx] = format!("▶ {}", &formatted_row[name_idx]);
-              style = Style::default()
-                .fg(app.user_config.theme.active)
-                .add_modifier(Modifier::BOLD);
-            }
-          }
+          && i == track_playing_offset_index
+        {
+          formatted_row[name_idx] = format!("▶ {}", &formatted_row[name_idx]);
+          style = Style::default()
+            .fg(app.user_config.theme.active)
+            .add_modifier(Modifier::BOLD);
         }
       }
       _ => {}
@@ -1843,7 +1563,7 @@ fn draw_table<B>(
     .map(|h| Constraint::Length(h.width))
     .collect::<Vec<tui::layout::Constraint>>();
 
-  let table = Table::new(rows)
+  let table = Table::new(rows, &widths)
     .header(
       Row::new(header.items.iter().map(|h| h.text))
         .style(Style::default().fg(app.user_config.theme.header)),
@@ -1861,4 +1581,35 @@ fn draw_table<B>(
     .style(Style::default().fg(app.user_config.theme.text))
     .widths(&widths);
   f.render_widget(table, layout_chunk);
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use tui::{Terminal, backend::TestBackend};
+
+  #[test]
+  fn migrated_views_render_on_small_and_large_terminals() {
+    for (width, height) in [(1, 1), (20, 6), (80, 24), (180, 50)] {
+      let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+      let (tx, _rx) = tokio::sync::mpsc::channel(64);
+      let mut app = App::new(tx, crate::user_config::UserConfig::new());
+      app.size = Rect::new(0, 0, width, height);
+      for route in [
+        RouteId::Home,
+        RouteId::Search,
+        RouteId::Artist,
+        RouteId::TrackTable,
+        RouteId::AlbumList,
+        RouteId::Podcasts,
+      ] {
+        app.push_navigation_stack(route, ActiveBlock::Empty);
+        terminal
+          .draw(|frame| draw_main_layout(frame, &app))
+          .unwrap();
+      }
+      terminal.draw(|frame| draw_help_menu(frame, &app)).unwrap();
+      terminal.draw(|frame| draw_basic_view(frame, &app)).unwrap();
+    }
+  }
 }
